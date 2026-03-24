@@ -18,8 +18,6 @@ from copy import deepcopy
 from detectron2.data.detection_utils import annotations_to_instances, transform_instance_annotations
 from detectron2.structures import BoxMode
 
-from .pose_utils import parse_shoot_spots, compute_pose_matrices
-
 
 class MultiPoly(Dataset):
     def __init__(self, img_folder, ann_file, transforms, semantic_classes,
@@ -70,6 +68,7 @@ class MultiPoly(Dataset):
         if not shoot_spots:
             return None, None
 
+        from .pose_utils import parse_shoot_spots, compute_pose_matrices
         parsed_spots = parse_shoot_spots(shoot_spots, base_dir=scene_dir)
         matrices = compute_pose_matrices(parsed_spots)
 
