@@ -78,26 +78,6 @@ def get_args_parser():
                         1. default -1 means non-semantic floorplan \
                         2. 19 for Structured3D: 16 room types + 1 door + 1 window + 1 empty")
 
-    # panorama cross-attention
-    parser.add_argument('--use_pano', action='store_true',
-                        help="Enable panorama cross-attention in the decoder")
-    parser.add_argument('--pano_dir', default=None, type=str,
-                        help="Directory containing panorama sub-dirs per scene")
-    parser.add_argument('--pano_backbone', default='resnet18', type=str,
-                        help="Backbone for panorama encoder")
-    parser.add_argument('--pano_input_h', default=256, type=int,
-                        help="Panorama input height (resize to)")
-    parser.add_argument('--pano_input_w', default=512, type=int,
-                        help="Panorama input width (resize to)")
-    parser.add_argument('--max_pano_count', default=10, type=int,
-                        help="Max panoramas per scene (clip if more)")
-    parser.add_argument('--freeze_pano_backbone', action='store_true',
-                        help="Freeze panorama encoder backbone weights")
-    parser.add_argument('--pano_grad_ckpt', action='store_true',
-                        help="Use gradient checkpointing for panorama encoder (save memory)")
-    parser.add_argument('--lr_pano', default=2e-4, type=float,
-                        help="Learning rate for panorama encoder trainable params")
-
     # loss
     parser.add_argument('--no_aux_loss', dest='aux_loss', action='store_true',
                         help="Disables auxiliary decoding losses (loss at each layer)")
@@ -193,41 +173,22 @@ def main(args):
     for n, p in model.named_parameters():
         print(n)
 
-    # separate param groups: base, backbone, linear_proj, pano_encoder
-    pano_keywords = ['pano_encoder', 'pano_cross_attn', 'pano_dropout', 'pano_norm']
-
     param_dicts = [
         {
             "params":
                 [p for n, p in model.named_parameters()
-                 if not match_name_keywords(n, args.lr_backbone_names)
-                 and not match_name_keywords(n, args.lr_linear_proj_names)
-                 and not match_name_keywords(n, pano_keywords)
-                 and p.requires_grad],
+                 if not match_name_keywords(n, args.lr_backbone_names) and not match_name_keywords(n, args.lr_linear_proj_names) and p.requires_grad],
             "lr": args.lr,
         },
         {
-            "params": [p for n, p in model.named_parameters()
-                       if match_name_keywords(n, args.lr_backbone_names) and p.requires_grad],
+            "params": [p for n, p in model.named_parameters() if match_name_keywords(n, args.lr_backbone_names) and p.requires_grad],
             "lr": args.lr_backbone,
         },
         {
-            "params": [p for n, p in model.named_parameters()
-                       if match_name_keywords(n, args.lr_linear_proj_names) and p.requires_grad],
+            "params": [p for n, p in model.named_parameters() if match_name_keywords(n, args.lr_linear_proj_names) and p.requires_grad],
             "lr": args.lr * args.lr_linear_proj_mult,
-        },
+        }
     ]
-
-    # panorama param group
-    if getattr(args, 'use_pano', False):
-        pano_params = [p for n, p in model.named_parameters()
-                       if match_name_keywords(n, pano_keywords) and p.requires_grad]
-        if pano_params:
-            param_dicts.append({
-                "params": pano_params,
-                "lr": args.lr_pano,
-            })
-
     if args.sgd:
         optimizer = torch.optim.SGD(param_dicts, lr=args.lr, momentum=0.9,
                                     weight_decay=args.weight_decay)
@@ -256,6 +217,7 @@ def main(args):
                 pg['initial_lr'] = pg_old['initial_lr']
             print(optimizer.param_groups)
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            # todo: this is a hack for doing experiment that resume from checkpoint and also modify lr scheduler (e.g., decrease lr in advance).
             args.override_resumed_lr_drop = False
             if args.override_resumed_lr_drop:
                 print('Warning: (hack) args.override_resumed_lr_drop is set to True, so args.lr_drop would override lr_drop in resumed lr_scheduler.')
@@ -263,6 +225,7 @@ def main(args):
                 lr_scheduler.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
             lr_scheduler.step(lr_scheduler.last_epoch)
             args.start_epoch = checkpoint['epoch'] + 1
+        # check the resumed model
         test_stats = evaluate(
             model, criterion, args.dataset_name, data_loader_val, device
         )
@@ -275,6 +238,7 @@ def main(args):
         lr_scheduler.step()
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
+            # extra checkpoint before LR drop and every 20 epochs
             if (epoch + 1) in args.lr_drop or (epoch + 1) % 20 == 0:
                 checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
             for checkpoint_path in checkpoint_paths:
@@ -321,6 +285,7 @@ def main(args):
                 }
 
         if args.semantic_classes > 0:
+            # need to log additional metrics for semantically-rich floorplans
             train_log_dict["train/loss_ce_room"] = train_stats['loss_ce_room']
             val_log_dict["val/loss_ce_room"] = test_stats['loss_ce_room']
             val_log_dict["val_metrics/room_sem_prec"] = test_stats['room_sem_prec']
@@ -329,6 +294,7 @@ def main(args):
             val_log_dict["val_metrics/window_door_rec"] = test_stats['window_door_rec']
 
         else:
+            # only apply the rasterization loss for non-semantic floorplans
             train_log_dict["train/loss_raster"] = train_stats['loss_raster']
             val_log_dict["val/loss_raster"] =  test_stats['loss_raster']
 

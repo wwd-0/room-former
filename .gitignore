@@ -1,0 +1,96 @@
+# ==========================
+# 1. Python 编译缓存文件
+# ==========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+*.eggs/
+.installed.cfg
+*.pyc
+
+# ==========================
+# 2. 你的项目 CUDA/C++ 编译产物（核心！）
+# ==========================
+# MultiScaleDeformableAttention 编译文件
+models/ops/build/
+models/ops/*.so
+models/ops/*.o
+models/ops/src/cuda/*.o
+models/ops/src/cpu/*.o
+
+# native_rasterizer 编译文件
+diff_ras/build/
+diff_ras/*.so
+diff_ras/*.o
+diff_ras/src/*.o
+
+# 通用编译临时文件
+*.cu.o
+*.cpp.o
+*.d
+
+# ==========================
+# 3. 虚拟环境（你的 roomformer 环境）
+# ==========================
+venv/
+env/
+roomformer/
+ENV/
+env.bak/
+venv.bak/
+
+# ==========================
+# 4. 模型权重 / 数据集 / 日志
+# ==========================
+*.pth
+*.pt
+*.ckpt
+*.bin
+weights/
+checkpoints/
+models/weights/
+datasets/
+data/
+logs/
+*.log
+runs/
+wandb/
+
+# ==========================
+# 5. IDE / 编辑器 缓存
+# ==========================
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# ==========================
+# 6. 系统垃圾文件
+# ==========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ==========================
+# 7. 临时文件 / 测试文件
+# ==========================
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*.swo

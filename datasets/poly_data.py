@@ -11,7 +11,6 @@ from util.poly_ops import resort_corners
 from detectron2.data import transforms as T
 from torch.utils.data import Dataset
 import numpy as np
-import json
 import os
 from copy import deepcopy
 
@@ -20,8 +19,7 @@ from detectron2.structures import BoxMode
 
 
 class MultiPoly(Dataset):
-    def __init__(self, img_folder, ann_file, transforms, semantic_classes,
-                 pano_dir=None, pano_h=256, pano_w=512, max_pano=10):
+    def __init__(self, img_folder, ann_file, transforms, semantic_classes):
         super(MultiPoly, self).__init__()
 
         self.root = img_folder
@@ -32,82 +30,32 @@ class MultiPoly(Dataset):
 
         self.prepare = ConvertToCocoDict(self.root, self._transforms)
 
-        self.pano_dir = pano_dir
-        self.pano_h = pano_h
-        self.pano_w = pano_w
-        self.max_pano = max_pano
-
     def get_image(self, path):
         return Image.open(os.path.join(self.root, path))
-
-    def _load_panoramas(self, scene_key):
-        """Load panorama images and poses for a scene.
-
-        Expected directory layout:
-            {pano_dir}/{scene_key}/
-                panorama_0.jpg
-                panorama_1.jpg
-                ...
-                poses.json   ->  {"panorama_0.jpg": [[4x4]], "panorama_1.jpg": [[4x4]], ...}
-        """
-        if self.pano_dir is None:
-            return None, None
-
-        scene_dir = os.path.join(self.pano_dir, scene_key)
-        if not os.path.isdir(scene_dir):
-            return None, None
-
-        poses_file = os.path.join(scene_dir, 'poses.json')
-        if not os.path.isfile(poses_file):
-            return None, None
-
-        with open(poses_file) as f:
-            poses_data = json.load(f)
-
-        pano_images = []
-        pose_matrices = []
-        for pano_name, pose in poses_data.items():
-            pano_path = os.path.join(scene_dir, pano_name)
-            if not os.path.isfile(pano_path):
-                continue
-            img = Image.open(pano_path).convert('RGB')
-            img = img.resize((self.pano_w, self.pano_h), Image.BILINEAR)
-            arr = np.array(img, dtype=np.float32) / 255.0
-            arr = arr.transpose(2, 0, 1)  # HWC -> CHW
-            pano_images.append(torch.from_numpy(arr))
-            pose_matrices.append(torch.tensor(pose, dtype=torch.float32))
-            if len(pano_images) >= self.max_pano:
-                break
-
-        if not pano_images:
-            return None, None
-
-        return pano_images, pose_matrices
-
+    
     def __len__(self):
         return len(self.ids)
 
     def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+        Returns:
+            dict: COCO format dict
+        """
         coco = self.coco
         img_id = self.ids[index]
 
         ann_ids = coco.getAnnIds(imgIds=img_id)
         target = coco.loadAnns(ann_ids)
 
+        ### Note: here is a hack which assumes door/window have category_id 16, 17 in structured3D
         if self.semantic_classes == -1:
             target = [t for t in target if t['category_id'] not in [16, 17]]
 
         path = coco.loadImgs(img_id)[0]['file_name']
 
         record = self.prepare(img_id, path, target)
-
-        # load panoramas if available
-        if self.pano_dir is not None:
-            scene_key = Path(path).stem
-            pano_imgs, pose_mats = self._load_panoramas(scene_key)
-            record['pano_images'] = pano_imgs       # list of (3, Hp, Wp) or None
-            record['pose_matrices'] = pose_mats      # list of (4, 4) or None
-            record['pano_count'] = len(pano_imgs) if pano_imgs else 0
 
         return record
 
@@ -151,6 +99,7 @@ class ConvertToCocoDict(object):
                     for obj in record.pop("annotations")
                     if obj.get("iscrowd", 0) == 0
                     ]
+            # resort corners after augmentation: so that all corners start from upper-left counterclockwise
             for anno in annos:
                 anno['segmentation'][0] = resort_corners(anno['segmentation'][0])
 
@@ -183,20 +132,7 @@ def build(image_set, args):
     }
 
     img_folder, ann_file = PATHS[image_set]
-
-    pano_dir = getattr(args, 'pano_dir', None)
-    pano_h = getattr(args, 'pano_input_h', 256)
-    pano_w = getattr(args, 'pano_input_w', 512)
-    max_pano = getattr(args, 'max_pano_count', 10)
-
-    dataset = MultiPoly(
-        img_folder, ann_file,
-        transforms=make_poly_transforms(image_set),
-        semantic_classes=args.semantic_classes,
-        pano_dir=pano_dir,
-        pano_h=pano_h,
-        pano_w=pano_w,
-        max_pano=max_pano,
-    )
-
+    
+    dataset = MultiPoly(img_folder, ann_file, transforms=make_poly_transforms(image_set), semantic_classes=args.semantic_classes)
+    
     return dataset
