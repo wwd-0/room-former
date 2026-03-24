@@ -32,7 +32,8 @@ class DeformableTransformer(nn.Module):
     def __init__(self, d_model=256, nhead=8,
                  num_encoder_layers=6, num_decoder_layers=6, dim_feedforward=1024, dropout=0.1,
                  activation="relu", poly_refine=True, return_intermediate_dec=False, aux_loss=False,
-                 num_feature_levels=4, dec_n_points=4, enc_n_points=4, query_pos_type="none"):
+                 num_feature_levels=4, dec_n_points=4, enc_n_points=4, query_pos_type="none",
+                 use_pano_cross_attn=False):
         super().__init__()
 
         self.d_model = d_model
@@ -45,7 +46,8 @@ class DeformableTransformer(nn.Module):
 
         decoder_layer = DeformableTransformerDecoderLayer(d_model, dim_feedforward,
                                                           dropout, activation,
-                                                          num_feature_levels, nhead, dec_n_points)
+                                                          num_feature_levels, nhead, dec_n_points,
+                                                          use_pano_cross_attn=use_pano_cross_attn)
         self.decoder = DeformableTransformerDecoder(decoder_layer, num_decoder_layers, poly_refine, return_intermediate_dec, aux_loss, query_pos_type)
 
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
@@ -74,7 +76,8 @@ class DeformableTransformer(nn.Module):
         valid_ratio = torch.stack([valid_ratio_w, valid_ratio_h], -1)
         return valid_ratio
 
-    def forward(self, srcs, masks, pos_embeds, query_embed=None, tgt=None, tgt_masks=None):
+    def forward(self, srcs, masks, pos_embeds, query_embed=None, tgt=None, tgt_masks=None,
+                pano_memory=None, pano_pos=None, pano_key_padding_mask=None):
         assert query_embed is not None
 
         # prepare input for encoder
@@ -112,8 +115,10 @@ class DeformableTransformer(nn.Module):
         init_reference_out = reference_points
 
         # decoder
-        hs, inter_references, inter_classes = self.decoder(tgt, reference_points, memory, src_flatten,
-                                            spatial_shapes, level_start_index, valid_ratios, query_embed, mask_flatten, tgt_masks)
+        hs, inter_references, inter_classes = self.decoder(
+            tgt, reference_points, memory, src_flatten,
+            spatial_shapes, level_start_index, valid_ratios, query_embed, mask_flatten, tgt_masks,
+            pano_memory=pano_memory, pano_pos=pano_pos, pano_key_padding_mask=pano_key_padding_mask)
 
         return hs, init_reference_out, inter_references, inter_classes
 
@@ -193,10 +198,11 @@ class DeformableTransformerEncoder(nn.Module):
 class DeformableTransformerDecoderLayer(nn.Module):
     def __init__(self, d_model=256, d_ffn=1024,
                  dropout=0.1, activation="relu",
-                 n_levels=4, n_heads=8, n_points=4):
+                 n_levels=4, n_heads=8, n_points=4,
+                 use_pano_cross_attn=False):
         super().__init__()
 
-        # cross attention
+        # cross attention (BEV)
         self.cross_attn = MSDeformAttn(d_model, n_levels, n_heads, n_points)
         self.dropout1 = nn.Dropout(dropout)
         self.norm1 = nn.LayerNorm(d_model)
@@ -205,6 +211,13 @@ class DeformableTransformerDecoderLayer(nn.Module):
         self.self_attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout)
         self.dropout2 = nn.Dropout(dropout)
         self.norm2 = nn.LayerNorm(d_model)
+
+        # panorama cross attention (optional)
+        self.pano_cross_attn = None
+        if use_pano_cross_attn:
+            self.pano_cross_attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout)
+            self.pano_dropout = nn.Dropout(dropout)
+            self.pano_norm = nn.LayerNorm(d_model)
 
         # ffn
         self.linear1 = nn.Linear(d_model, d_ffn)
@@ -224,21 +237,34 @@ class DeformableTransformerDecoderLayer(nn.Module):
         tgt = self.norm3(tgt)
         return tgt
 
-    def forward(self, tgt, query_pos, reference_points, src, src_spatial_shapes, level_start_index, src_padding_mask=None, tgt_masks=None):
-        # self attention
+    def forward(self, tgt, query_pos, reference_points, src, src_spatial_shapes,
+                level_start_index, src_padding_mask=None, tgt_masks=None,
+                pano_memory=None, pano_pos=None, pano_key_padding_mask=None):
+        # 1) self attention
         q = k = self.with_pos_embed(tgt, query_pos)
         tgt2 = self.self_attn(q.transpose(0, 1), k.transpose(0, 1), tgt.transpose(0, 1), attn_mask=tgt_masks)[0].transpose(0, 1)
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
 
-        # cross attention
+        # 2) BEV cross attention
         tgt2 = self.cross_attn(self.with_pos_embed(tgt, query_pos),
                                reference_points,
                                src, src_spatial_shapes, level_start_index, src_padding_mask)
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
 
-        # ffn
+        # 3) panorama cross attention
+        if self.pano_cross_attn is not None and pano_memory is not None:
+            q2 = self.with_pos_embed(tgt, query_pos).transpose(0, 1)
+            k2 = self.with_pos_embed(pano_memory, pano_pos).transpose(0, 1)
+            v2 = pano_memory.transpose(0, 1)
+            tgt2 = self.pano_cross_attn(
+                q2, k2, v2, key_padding_mask=pano_key_padding_mask
+            )[0].transpose(0, 1)
+            tgt = tgt + self.pano_dropout(tgt2)
+            tgt = self.pano_norm(tgt)
+
+        # 4) ffn
         tgt = self.forward_ffn(tgt)
 
         return tgt
@@ -275,7 +301,8 @@ class DeformableTransformerDecoder(nn.Module):
         return pos
 
     def forward(self, tgt, reference_points, src, src_flatten, src_spatial_shapes, src_level_start_index, src_valid_ratios,
-                query_pos=None, src_padding_mask=None, tgt_masks=None):
+                query_pos=None, src_padding_mask=None, tgt_masks=None,
+                pano_memory=None, pano_pos=None, pano_key_padding_mask=None):
         output = tgt    # [10, 800, 256]
 
         intermediate = []
@@ -292,7 +319,10 @@ class DeformableTransformerDecoder(nn.Module):
             elif self.query_pos_type == 'none':
                 query_pos = None
 
-            output = layer(output, query_pos, reference_points_input, src, src_spatial_shapes, src_level_start_index, src_padding_mask, tgt_masks)
+            output = layer(output, query_pos, reference_points_input, src, src_spatial_shapes,
+                           src_level_start_index, src_padding_mask, tgt_masks,
+                           pano_memory=pano_memory, pano_pos=pano_pos,
+                           pano_key_padding_mask=pano_key_padding_mask)
     
             # iterative polygon refinement
             if self.poly_refine:
@@ -360,6 +390,7 @@ def build_deforamble_transformer(args):
         num_feature_levels=args.num_feature_levels,
         dec_n_points=args.dec_n_points,
         enc_n_points=args.enc_n_points,
-        query_pos_type=args.query_pos_type)
+        query_pos_type=args.query_pos_type,
+        use_pano_cross_attn=getattr(args, 'use_pano', False))
 
 
