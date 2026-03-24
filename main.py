@@ -98,6 +98,13 @@ def get_args_parser():
     parser.add_argument('--lr_pano', default=2e-4, type=float,
                         help="Learning rate for panorama encoder trainable params")
 
+    # BEV input
+    parser.add_argument('--bev_channels', default=3, type=int,
+                        help="BEV input channels (1=grayscale density, 3=pseudo-color RGB)")
+    # depth maps
+    parser.add_argument('--use_depth', action='store_true',
+                        help="Load and use per-panorama depth maps (concatenated with RGB as 4ch input)")
+
     # loss
     parser.add_argument('--no_aux_loss', dest='aux_loss', action='store_true',
                         help="Disables auxiliary decoding losses (loss at each layer)")

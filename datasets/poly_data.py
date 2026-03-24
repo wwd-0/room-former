@@ -21,7 +21,8 @@ from detectron2.structures import BoxMode
 
 class MultiPoly(Dataset):
     def __init__(self, img_folder, ann_file, transforms, semantic_classes,
-                 pano_dir=None, pano_h=256, pano_w=512, max_pano=10):
+                 pano_dir=None, pano_h=256, pano_w=512, max_pano=10,
+                 bev_channels=3, use_depth=False):
         super(MultiPoly, self).__init__()
 
         self.root = img_folder
@@ -30,49 +31,55 @@ class MultiPoly(Dataset):
         self.coco = COCO(ann_file)
         self.ids = list(sorted(self.coco.imgs.keys()))
 
-        self.prepare = ConvertToCocoDict(self.root, self._transforms)
+        self.bev_channels = bev_channels
+        self.prepare = ConvertToCocoDict(self.root, self._transforms,
+                                         bev_channels=bev_channels)
 
         self.pano_dir = pano_dir
         self.pano_h = pano_h
         self.pano_w = pano_w
         self.max_pano = max_pano
+        self.use_depth = use_depth
 
     def get_image(self, path):
         return Image.open(os.path.join(self.root, path))
 
-    def _load_panoramas(self, scene_key):
-        """Load panorama images and poses from ViewData.txt.
+    def _load_panoramas(self, scene_dir):
+        """Load panorama images, depth maps, and poses from viewData.txt.
 
-        Expected directory layout:
-            {pano_dir}/{scene_key}/
-                ViewData.txt        # JSON: { "HouseData": { "ShootSpots": [...] } }
-                玄关.jpg             # panorama named after spot (from ThumbnailUrl)
-                主卧.jpg
-                ...
+        Expected directory layout (dataset_v1 format):
+            {scene_dir}/
+                viewData.txt           # JSON with HouseData.ShootSpots
+                panoramas/玄关.jpg     # panorama RGB
+                depths/玄关_depth.png  # depth map
         """
-        if self.pano_dir is None:
-            return None, None
-
-        scene_dir = os.path.join(self.pano_dir, scene_key)
         if not os.path.isdir(scene_dir):
-            return None, None
+            return None, None, None
 
-        viewdata_path = os.path.join(scene_dir, 'ViewData.txt')
-        if not os.path.isfile(viewdata_path):
-            return None, None
+        viewdata_path = None
+        for name in ('viewData.txt', 'ViewData.txt'):
+            p = os.path.join(scene_dir, name)
+            if os.path.isfile(p):
+                viewdata_path = p
+                break
+        if viewdata_path is None:
+            return None, None, None
 
         with open(viewdata_path, 'r') as f:
             viewdata = json.load(f)
 
         shoot_spots = viewdata.get('HouseData', {}).get('ShootSpots', [])
         if not shoot_spots:
-            return None, None
+            return None, None, None
 
         from .pose_utils import parse_shoot_spots, compute_pose_matrices
-        parsed_spots = parse_shoot_spots(shoot_spots, base_dir=scene_dir)
+        parsed_spots = parse_shoot_spots(
+            shoot_spots, base_dir=scene_dir,
+            pano_subdir='panoramas', depth_subdir='depths')
         matrices = compute_pose_matrices(parsed_spots)
 
         pano_images = []
+        depth_images = []
         pose_matrices = []
         for spot, mat in zip(parsed_spots, matrices):
             pano_path = spot['panorama_path']
@@ -81,16 +88,30 @@ class MultiPoly(Dataset):
             img = Image.open(pano_path).convert('RGB')
             img = img.resize((self.pano_w, self.pano_h), Image.BILINEAR)
             arr = np.array(img, dtype=np.float32) / 255.0
-            arr = arr.transpose(2, 0, 1)  # HWC -> CHW
+            arr = arr.transpose(2, 0, 1)  # (3, Hp, Wp)
             pano_images.append(torch.from_numpy(arr))
             pose_matrices.append(torch.from_numpy(mat))
+
+            if self.use_depth:
+                depth_path = spot.get('depth_path', '')
+                if os.path.isfile(depth_path):
+                    d_img = Image.open(depth_path)
+                    d_img = d_img.resize((self.pano_w, self.pano_h), Image.NEAREST)
+                    d_arr = np.array(d_img, dtype=np.float32)
+                    if d_arr.ndim == 3:
+                        d_arr = d_arr[:, :, 0]
+                    d_arr = d_arr / d_arr.max().clip(min=1e-6)  # normalize to [0, 1]
+                    depth_images.append(torch.from_numpy(d_arr).unsqueeze(0))  # (1, Hp, Wp)
+                else:
+                    depth_images.append(torch.zeros(1, self.pano_h, self.pano_w))
+
             if len(pano_images) >= self.max_pano:
                 break
 
         if not pano_images:
-            return None, None
+            return None, None, None
 
-        return pano_images, pose_matrices
+        return pano_images, pose_matrices, (depth_images if self.use_depth else None)
 
     def __len__(self):
         return len(self.ids)
@@ -109,28 +130,53 @@ class MultiPoly(Dataset):
 
         record = self.prepare(img_id, path, target)
 
-        # load panoramas if available
         if self.pano_dir is not None:
-            scene_key = Path(path).stem
-            pano_imgs, pose_mats = self._load_panoramas(scene_key)
-            record['pano_images'] = pano_imgs       # list of (3, Hp, Wp) or None
+            scene_key = str(Path(path).parent)
+            scene_dir = os.path.join(self.root, scene_key)
+            pano_imgs, pose_mats, depth_imgs = self._load_panoramas(scene_dir)
+            record['pano_images'] = pano_imgs        # list of (3, Hp, Wp) or None
             record['pose_matrices'] = pose_mats      # list of (4, 4) or None
+            record['depth_images'] = depth_imgs      # list of (1, Hp, Wp) or None
             record['pano_count'] = len(pano_imgs) if pano_imgs else 0
 
         return record
 
 
 class ConvertToCocoDict(object):
-    def __init__(self, root, augmentations):
+    def __init__(self, root, augmentations, bev_channels=3):
         self.root = root
         self.augmentations = augmentations
+        self.bev_channels = bev_channels
+
+    def _load_image(self, file_name):
+        if self.bev_channels == 3:
+            img = np.array(Image.open(file_name).convert('RGB'))  # (H, W, 3)
+            h, w = img.shape[:2]
+            return img, h, w
+        elif self.bev_channels == 1:
+            img = np.array(Image.open(file_name).convert('L'))    # (H, W)
+            h, w = img.shape
+            return img, h, w
+        else:
+            img = np.array(Image.open(file_name))
+            if img.ndim == 3:
+                h, w = img.shape[:2]
+            else:
+                h, w = img.shape
+            return img, h, w
+
+    def _to_tensor(self, img):
+        if img.ndim == 2:
+            return (1/255) * torch.as_tensor(
+                np.ascontiguousarray(np.expand_dims(img, 0)), dtype=torch.float32)
+        else:
+            return (1/255) * torch.as_tensor(
+                np.ascontiguousarray(img.transpose(2, 0, 1)), dtype=torch.float32)
 
     def __call__(self, img_id, path, target):
 
         file_name = os.path.join(self.root, path)
-
-        img = np.array(Image.open(file_name))
-        w, h = img.shape
+        img, h, w = self._load_image(file_name)
 
         record = {}
         record["file_name"] = file_name
@@ -142,15 +188,14 @@ class ConvertToCocoDict(object):
 
         record['annotations'] = target
 
-
         if self.augmentations is None:
-            record['image'] = (1/255) * torch.as_tensor(np.ascontiguousarray(np.expand_dims(img, 0)))
+            record['image'] = self._to_tensor(img)
             record['instances'] = annotations_to_instances(target, (h, w), mask_format="polygon")
         else:
             aug_input = T.AugInput(img)
             transforms = self.augmentations(aug_input)
             image = aug_input.image
-            record['image'] = (1/255) * torch.as_tensor(np.array(np.expand_dims(image, 0)))
+            record['image'] = self._to_tensor(image)
             
             annos = [
                 transform_instance_annotations(
@@ -192,10 +237,15 @@ def build(image_set, args):
 
     img_folder, ann_file = PATHS[image_set]
 
+    use_pano = getattr(args, 'use_pano', False)
     pano_dir = getattr(args, 'pano_dir', None)
+    if use_pano and pano_dir is None:
+        pano_dir = str(img_folder)
     pano_h = getattr(args, 'pano_input_h', 256)
     pano_w = getattr(args, 'pano_input_w', 512)
     max_pano = getattr(args, 'max_pano_count', 10)
+    bev_channels = getattr(args, 'bev_channels', 3)
+    use_depth = getattr(args, 'use_depth', False)
 
     dataset = MultiPoly(
         img_folder, ann_file,
@@ -205,6 +255,8 @@ def build(image_set, args):
         pano_h=pano_h,
         pano_w=pano_w,
         max_pano=max_pano,
+        bev_channels=bev_channels,
+        use_depth=use_depth,
     )
 
     return dataset

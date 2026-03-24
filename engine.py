@@ -28,17 +28,19 @@ opts = options.parse()
 
 
 def _prepare_pano_batch(batched_inputs, device):
-    """Collect panorama images/poses from a batch and pad to uniform tensors.
+    """Collect panorama images/poses/depths from a batch and pad to uniform tensors.
 
-    Returns (pano_images, pose_matrices, pano_counts) or (None, None, None)
-    if no panorama data is present.
+    Returns (pano_images, pose_matrices, pano_counts, depth_images).
+    depth_images is None when no depth data is present.
+    Returns (None, None, None, None) if no panorama data is present at all.
     """
     pano_lists = [x.get('pano_images') for x in batched_inputs]
     pose_lists = [x.get('pose_matrices') for x in batched_inputs]
+    depth_lists = [x.get('depth_images') for x in batched_inputs]
 
     has_pano = any(p is not None and len(p) > 0 for p in pano_lists)
     if not has_pano:
-        return None, None, None
+        return None, None, None, None
 
     B = len(batched_inputs)
     counts = []
@@ -47,7 +49,7 @@ def _prepare_pano_batch(batched_inputs, device):
 
     N_max = max(counts)
     if N_max == 0:
-        return None, None, None
+        return None, None, None, None
 
     ref_idx = counts.index(max(counts))
     C, Hp, Wp = pano_lists[ref_idx][0].shape
@@ -55,15 +57,22 @@ def _prepare_pano_batch(batched_inputs, device):
     pano_padded = torch.zeros(B, N_max, C, Hp, Wp, device=device)
     pose_padded = torch.zeros(B, N_max, 4, 4, device=device)
 
+    has_depth = any(d is not None and len(d) > 0 for d in depth_lists)
+    depth_padded = None
+    if has_depth:
+        depth_padded = torch.zeros(B, N_max, 1, Hp, Wp, device=device)
+
     for b in range(B):
         n = counts[b]
         if n > 0 and pano_lists[b] is not None:
             for j in range(n):
                 pano_padded[b, j] = pano_lists[b][j].to(device)
                 pose_padded[b, j] = pose_lists[b][j].to(device)
+                if depth_padded is not None and depth_lists[b] is not None and j < len(depth_lists[b]):
+                    depth_padded[b, j] = depth_lists[b][j].to(device)
 
     pano_counts = torch.tensor(counts, dtype=torch.long, device=device)
-    return pano_padded, pose_padded, pano_counts
+    return pano_padded, pose_padded, pano_counts, depth_padded
 
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
@@ -82,12 +91,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
         room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
 
-        pano_images, pose_matrices, pano_counts = _prepare_pano_batch(batched_inputs, device)
+        pano_images, pose_matrices, pano_counts, depth_images = _prepare_pano_batch(batched_inputs, device)
 
         outputs = model(samples,
                         pano_images=pano_images,
                         pose_matrices=pose_matrices,
-                        pano_counts=pano_counts)
+                        pano_counts=pano_counts,
+                        depth_images=depth_images)
         loss_dict = criterion(outputs, room_targets)
         weight_dict = criterion.weight_dict
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
@@ -136,12 +146,13 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
         room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
 
-        pano_images, pose_matrices, pano_counts = _prepare_pano_batch(batched_inputs, device)
+        pano_images, pose_matrices, pano_counts, depth_images = _prepare_pano_batch(batched_inputs, device)
 
         outputs = model(samples,
                         pano_images=pano_images,
                         pose_matrices=pose_matrices,
-                        pano_counts=pano_counts)
+                        pano_counts=pano_counts,
+                        depth_images=depth_images)
         loss_dict = criterion(outputs, room_targets)
         weight_dict = criterion.weight_dict
 
@@ -261,14 +272,15 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
         scene_ids = [x["image_id"] for x in batched_inputs]
         gt_instances = [x["instances"].to(device) for x in batched_inputs]
 
-        pano_images, pose_matrices, pano_counts = _prepare_pano_batch(batched_inputs, device)
+        pano_images, pose_matrices, pano_counts, depth_images = _prepare_pano_batch(batched_inputs, device)
 
         if plot_gt:
             for i, gt_inst in enumerate(gt_instances):
                 if not semantic_rich:
                     gt_polys = []
                     density_map = np.transpose((samples[i] * 255).cpu().numpy(), [1, 2, 0])
-                    density_map = np.repeat(density_map, 3, axis=2)
+                    if density_map.shape[2] == 1:
+                        density_map = np.repeat(density_map, 3, axis=2)
 
                     gt_corner_map = np.zeros([256, 256, 3])
                     for j, poly in enumerate(gt_inst.gt_masks.polygons):
@@ -294,7 +306,8 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
         outputs = model(samples,
                         pano_images=pano_images,
                         pose_matrices=pose_matrices,
-                        pano_counts=pano_counts)
+                        pano_counts=pano_counts,
+                        depth_images=depth_images)
         pred_logits = outputs['pred_logits']
         pred_corners = outputs['pred_coords']
         fg_mask = torch.sigmoid(pred_logits) > 0.5
@@ -393,7 +406,8 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
 
             if plot_density:
                 density_map = np.transpose((samples[i] * 255).cpu().numpy(), [1, 2, 0])
-                density_map = np.repeat(density_map, 3, axis=2)
+                if density_map.shape[2] == 1:
+                    density_map = np.repeat(density_map, 3, axis=2)
                 pred_room_map = np.zeros([256, 256, 3])
 
                 for room_poly in room_polys:

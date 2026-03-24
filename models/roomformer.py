@@ -114,13 +114,15 @@ class RoomFormer(nn.Module):
             self.attention_mask = None
 
     def forward(self, samples: NestedTensor,
-                pano_images=None, pose_matrices=None, pano_counts=None):
+                pano_images=None, pose_matrices=None, pano_counts=None,
+                depth_images=None):
         """
         Args:
-            samples: NestedTensor or list of tensors (BEV density maps)
-            pano_images:   (B, N_max, 3, Hp, Wp) padded panorama batch (optional)
+            samples: NestedTensor or list of tensors (BEV images)
+            pano_images:   (B, N_max, 3, Hp, Wp) padded panorama RGB (optional)
             pose_matrices: (B, N_max, 4, 4)        padded pose matrices (optional)
             pano_counts:   (B,) actual panorama count per sample   (optional)
+            depth_images:  (B, N_max, 1, Hp, Wp) padded depth maps  (optional)
         """
         if not isinstance(samples, NestedTensor):
             samples = nested_tensor_from_tensor_list(samples)
@@ -148,11 +150,11 @@ class RoomFormer(nn.Module):
                 masks.append(mask)
                 pos.append(pos_l)
 
-        # panorama encoder
         pano_memory, pano_pos, pano_kpm = None, None, None
         if self.pano_encoder is not None and pano_images is not None:
             pano_memory, pano_pos, pano_kpm = self.pano_encoder(
-                pano_images, pose_matrices, pano_counts)
+                pano_images, pose_matrices, pano_counts,
+                depth_images=depth_images)
 
         query_embeds = self.query_embed.weight
         tgt_embeds = self.tgt_embed.weight

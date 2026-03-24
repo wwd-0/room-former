@@ -92,13 +92,14 @@ class Backbone(BackboneBase):
     def __init__(self, name: str,
                  train_backbone: bool,
                  return_interm_layers: bool,
-                 dilation: bool):
+                 dilation: bool,
+                 bev_channels: int = 3):
         norm_layer = FrozenBatchNorm2d
         backbone = getattr(torchvision.models, name)(
             replace_stride_with_dilation=[False, False, dilation],
             pretrained=True, norm_layer=norm_layer)
-        # modify the first layer to compatible with single channel input
-        backbone.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        if bev_channels != 3:
+            backbone.conv1 = nn.Conv2d(bev_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
         assert name not in ('resnet18', 'resnet34'), "number of channels are hard coded"
         super().__init__(backbone, train_backbone, return_interm_layers)
         if dilation:
@@ -129,6 +130,7 @@ def build_backbone(args):
     position_embedding = build_position_encoding(args)
     train_backbone = args.lr_backbone > 0
     return_interm_layers = args.num_feature_levels > 1
-    backbone = Backbone(args.backbone, train_backbone, return_interm_layers, args.dilation)
+    bev_channels = getattr(args, 'bev_channels', 3)
+    backbone = Backbone(args.backbone, train_backbone, return_interm_layers, args.dilation, bev_channels)
     model = Joiner(backbone, position_embedding)
     return model

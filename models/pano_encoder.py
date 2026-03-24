@@ -1,8 +1,8 @@
 """Panorama feature encoder for RoomFormer.
 
-Extracts visual features from N panorama images per scene and produces
-d_model-dimensional tokens with pose-based positional encoding, ready
-for cross-attention in the Deformable Transformer decoder.
+Extracts visual features from N panorama images (RGB + optional Depth)
+per scene and produces d_model-dimensional tokens with pose-based
+positional encoding, ready for cross-attention in the decoder.
 """
 
 import torch
@@ -14,10 +14,27 @@ class PanoEncoder(nn.Module):
     """Encode multiple panorama images into a flat token sequence."""
 
     def __init__(self, d_model=256, backbone_name='resnet18',
-                 freeze_backbone=True, use_gradient_checkpointing=False):
+                 freeze_backbone=True, use_gradient_checkpointing=False,
+                 use_depth=False):
         super().__init__()
 
+        self.use_depth = use_depth
+        in_channels = 4 if use_depth else 3
+
         resnet = getattr(torchvision.models, backbone_name)(pretrained=True)
+
+        if in_channels != 3:
+            old_conv1 = resnet.conv1
+            new_conv1 = nn.Conv2d(in_channels, old_conv1.out_channels,
+                                  kernel_size=old_conv1.kernel_size,
+                                  stride=old_conv1.stride,
+                                  padding=old_conv1.padding,
+                                  bias=False)
+            with torch.no_grad():
+                new_conv1.weight[:, :3] = old_conv1.weight
+                new_conv1.weight[:, 3:] = 0.0
+            resnet.conv1 = new_conv1
+
         self.body = nn.Sequential(*list(resnet.children())[:-2])
 
         feat_channels = 512 if backbone_name in ('resnet18', 'resnet34') else 2048
@@ -54,22 +71,29 @@ class PanoEncoder(nn.Module):
     def _extract_features(self, x):
         return self.proj(self.body(x))
 
-    def forward(self, pano_images, pose_matrices, pano_counts):
+    def forward(self, pano_images, pose_matrices, pano_counts,
+                depth_images=None):
         """
         Args:
-            pano_images:   (B, N_max, 3, Hp, Wp)  zero-padded panorama batch
-            pose_matrices: (B, N_max, 4, 4)        zero-padded pose matrices
-            pano_counts:   (B,)  actual panorama count per sample
+            pano_images:   (B, N_max, 3, Hp, Wp)  zero-padded RGB
+            pose_matrices: (B, N_max, 4, 4)        zero-padded poses
+            pano_counts:   (B,)  actual count per sample
+            depth_images:  (B, N_max, 1, Hp, Wp)  zero-padded depth (optional)
 
         Returns:
-            pano_tokens: (B, T, d_model)   T = N_max * h' * w'
-            pano_pos:    (B, T, d_model)   pose-based positional encoding
-            pano_mask:   (B, T)            True = padded (for key_padding_mask)
+            pano_tokens: (B, T, d_model)
+            pano_pos:    (B, T, d_model)
+            pano_mask:   (B, T)  True = padded
         """
         B, N_max, C, Hp, Wp = pano_images.shape
         device = pano_images.device
 
-        x = pano_images.reshape(B * N_max, C, Hp, Wp)
+        if self.use_depth and depth_images is not None:
+            x = torch.cat([pano_images, depth_images], dim=2)  # (B, N, 4, Hp, Wp)
+        else:
+            x = pano_images
+
+        x = x.reshape(B * N_max, x.shape[2], Hp, Wp)
 
         if self.use_gradient_checkpointing and self.training:
             feat = torch.utils.checkpoint.checkpoint(
@@ -78,7 +102,7 @@ class PanoEncoder(nn.Module):
             feat = self._extract_features(x)
 
         _, d, h, w = feat.shape
-        tpp = h * w  # tokens per panorama
+        tpp = h * w
 
         tokens = feat.flatten(2).transpose(1, 2).reshape(B, N_max, tpp, d)
 
@@ -106,4 +130,5 @@ def build_pano_encoder(args):
         backbone_name=getattr(args, 'pano_backbone', 'resnet18'),
         freeze_backbone=getattr(args, 'freeze_pano_backbone', True),
         use_gradient_checkpointing=getattr(args, 'pano_grad_ckpt', False),
+        use_depth=getattr(args, 'use_depth', False),
     )
