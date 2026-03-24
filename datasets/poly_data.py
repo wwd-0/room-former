@@ -18,6 +18,8 @@ from copy import deepcopy
 from detectron2.data.detection_utils import annotations_to_instances, transform_instance_annotations
 from detectron2.structures import BoxMode
 
+from .pose_utils import parse_shoot_spots, compute_pose_matrices
+
 
 class MultiPoly(Dataset):
     def __init__(self, img_folder, ann_file, transforms, semantic_classes,
@@ -41,14 +43,14 @@ class MultiPoly(Dataset):
         return Image.open(os.path.join(self.root, path))
 
     def _load_panoramas(self, scene_key):
-        """Load panorama images and poses for a scene.
+        """Load panorama images and poses from ViewData.txt.
 
         Expected directory layout:
             {pano_dir}/{scene_key}/
-                panorama_0.jpg
-                panorama_1.jpg
+                ViewData.txt        # JSON: { "HouseData": { "ShootSpots": [...] } }
+                玄关.jpg             # panorama named after spot (from ThumbnailUrl)
+                主卧.jpg
                 ...
-                poses.json   ->  {"panorama_0.jpg": [[4x4]], "panorama_1.jpg": [[4x4]], ...}
         """
         if self.pano_dir is None:
             return None, None
@@ -57,17 +59,24 @@ class MultiPoly(Dataset):
         if not os.path.isdir(scene_dir):
             return None, None
 
-        poses_file = os.path.join(scene_dir, 'poses.json')
-        if not os.path.isfile(poses_file):
+        viewdata_path = os.path.join(scene_dir, 'ViewData.txt')
+        if not os.path.isfile(viewdata_path):
             return None, None
 
-        with open(poses_file) as f:
-            poses_data = json.load(f)
+        with open(viewdata_path, 'r') as f:
+            viewdata = json.load(f)
+
+        shoot_spots = viewdata.get('HouseData', {}).get('ShootSpots', [])
+        if not shoot_spots:
+            return None, None
+
+        parsed_spots = parse_shoot_spots(shoot_spots, base_dir=scene_dir)
+        matrices = compute_pose_matrices(parsed_spots)
 
         pano_images = []
         pose_matrices = []
-        for pano_name, pose in poses_data.items():
-            pano_path = os.path.join(scene_dir, pano_name)
+        for spot, mat in zip(parsed_spots, matrices):
+            pano_path = spot['panorama_path']
             if not os.path.isfile(pano_path):
                 continue
             img = Image.open(pano_path).convert('RGB')
@@ -75,7 +84,7 @@ class MultiPoly(Dataset):
             arr = np.array(img, dtype=np.float32) / 255.0
             arr = arr.transpose(2, 0, 1)  # HWC -> CHW
             pano_images.append(torch.from_numpy(arr))
-            pose_matrices.append(torch.tensor(pose, dtype=torch.float32))
+            pose_matrices.append(torch.from_numpy(mat))
             if len(pano_images) >= self.max_pano:
                 break
 
