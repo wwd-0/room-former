@@ -24,7 +24,7 @@ class RoomFormer(nn.Module):
     """ This is the RoomFormer module that performs floorplan reconstruction """
     def __init__(self, backbone, transformer, num_classes, num_queries, num_polys, num_feature_levels,
                  aux_loss=True, with_poly_refine=False, masked_attn=False, semantic_classes=-1,
-                 pano_encoder=None):
+                 pano_encoder=None, use_pano_geom_bias=False, pano_backproject_sigma=64.0):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -40,6 +40,8 @@ class RoomFormer(nn.Module):
         self.num_queries = num_queries
         self.num_polys = num_polys
         self.pano_encoder = pano_encoder
+        self.use_pano_geom_bias = use_pano_geom_bias
+        self.pano_backproject_sigma = pano_backproject_sigma
         assert  num_queries % num_polys == 0
         self.transformer = transformer
         hidden_dim = transformer.d_model
@@ -115,7 +117,7 @@ class RoomFormer(nn.Module):
 
     def forward(self, samples: NestedTensor,
                 pano_images=None, pose_matrices=None, pano_counts=None,
-                depth_images=None):
+                depth_images=None, bev_world_meta=None):
         """
         Args:
             samples: NestedTensor or list of tensors (BEV images)
@@ -123,6 +125,7 @@ class RoomFormer(nn.Module):
             pose_matrices: (B, N_max, 4, 4)        padded pose matrices (optional)
             pano_counts:   (B,) actual panorama count per sample   (optional)
             depth_images:  (B, N_max, 1, Hp, Wp) padded depth maps  (optional)
+            bev_world_meta: optional dict for equirectangular back-project bias (see engine)
         """
         if not isinstance(samples, NestedTensor):
             samples = nested_tensor_from_tensor_list(samples)
@@ -150,19 +153,42 @@ class RoomFormer(nn.Module):
                 masks.append(mask)
                 pos.append(pos_l)
 
-        pano_memory, pano_pos, pano_kpm = None, None, None
+        pano_memory, pano_pos, pano_kpm, pano_token_uv = None, None, None, None
+        pano_tpp = None
         if self.pano_encoder is not None and pano_images is not None:
-            pano_memory, pano_pos, pano_kpm = self.pano_encoder(
+            pano_memory, pano_pos, pano_kpm, pano_token_uv = self.pano_encoder(
                 pano_images, pose_matrices, pano_counts,
                 depth_images=depth_images)
+            _, N_max, _, Hp, Wp = pano_images.shape
+            pano_tpp = pano_memory.shape[1] // max(N_max, 1)
 
         query_embeds = self.query_embed.weight
         tgt_embeds = self.tgt_embed.weight
-        
+
+        use_geom = (
+            self.use_pano_geom_bias
+            and bev_world_meta is not None
+            and pano_token_uv is not None
+            and pose_matrices is not None
+            and pano_counts is not None
+        )
+        pano_hw = None
+        if pano_images is not None:
+            pano_hw = (int(pano_images.shape[-2]), int(pano_images.shape[-1]))
+
         hs, init_reference, inter_references, inter_classes = self.transformer(
             srcs, masks, pos, query_embeds, tgt_embeds, self.attention_mask,
             pano_memory=pano_memory, pano_pos=pano_pos,
-            pano_key_padding_mask=pano_kpm)
+            pano_key_padding_mask=pano_kpm,
+            pano_token_uv=pano_token_uv,
+            pano_tokens_per_pano=pano_tpp,
+            bev_world_meta=bev_world_meta if use_geom else None,
+            pose_matrices=pose_matrices if use_geom else None,
+            pano_counts=pano_counts if use_geom else None,
+            pano_image_hw=pano_hw,
+            use_pano_geom_bias=use_geom,
+            pano_sigma=self.pano_backproject_sigma,
+        )
 
         num_layer = hs.shape[0]
         outputs_class = inter_classes.reshape(num_layer, bs, self.num_polys, self.num_queries_per_poly)
@@ -330,6 +356,8 @@ def build(args, train=True):
         masked_attn=args.masked_attn,
         semantic_classes=args.semantic_classes,
         pano_encoder=pano_encoder,
+        use_pano_geom_bias=getattr(args, 'pano_backproject_bias', False),
+        pano_backproject_sigma=getattr(args, 'pano_backproject_sigma', 64.0),
     )
 
     if not train:

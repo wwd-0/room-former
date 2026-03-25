@@ -139,6 +139,21 @@ class MultiPoly(Dataset):
             record['depth_images'] = depth_imgs      # list of (1, Hp, Wp) or None
             record['pano_count'] = len(pano_imgs) if pano_imgs else 0
 
+        # BEV 世界系 footprint，与 generate_bev.py / generate_pointcloud 反投影一致（可选）
+        scene_key = str(Path(path).parent)
+        scene_dir = os.path.join(self.root, scene_key)
+        bev_meta_path = os.path.join(scene_dir, 'bev_meta.json')
+        if os.path.isfile(bev_meta_path):
+            with open(bev_meta_path, 'r', encoding='utf-8') as bf:
+                bj = json.load(bf)
+            record['bev_world_meta'] = {
+                'origin_xz': torch.tensor(
+                    [float(bj['origin_x']), float(bj['origin_z'])],
+                    dtype=torch.float32),
+                'meters_per_pixel': float(bj.get('meters_per_pixel', 0.02)),
+                'world_y': float(bj.get('world_y', 0.0)),
+            }
+
         return record
 
 

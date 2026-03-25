@@ -75,6 +75,29 @@ def _prepare_pano_batch(batched_inputs, device):
     return pano_padded, pose_padded, pano_counts, depth_padded
 
 
+def _prepare_bev_world_meta(batched_inputs, image_hw, device):
+    """Stack per-sample BEV 世界系 footprint，供全景反投影注意力偏置使用。
+
+    要求 batch 内每条样本均含 ``bev_world_meta``（见 poly_data / bev_meta.json），
+    且 ``image_hw`` 与当前输入 BEV 张量 (H, W) 一致。
+    """
+    metas = [x.get("bev_world_meta") for x in batched_inputs]
+    if any(m is None for m in metas):
+        return None
+    H, W = int(image_hw[0]), int(image_hw[1])
+    origins = torch.stack([m["origin_xz"] for m in metas]).to(device=device, dtype=torch.float32)
+    mpp_vals = [float(m.get("meters_per_pixel", 0.02)) for m in metas]
+    mpp_t = torch.tensor(mpp_vals, device=device, dtype=torch.float32)
+    wy_vals = [float(m.get("world_y", 0.0)) for m in metas]
+    wy_t = torch.tensor(wy_vals, device=device, dtype=torch.float32)
+    return {
+        "origin_xz": origins,
+        "grid_hw": (H, W),
+        "meters_per_pixel": mpp_t,
+        "world_y": wy_t,
+    }
+
+
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0):
@@ -92,12 +115,15 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
 
         pano_images, pose_matrices, pano_counts, depth_images = _prepare_pano_batch(batched_inputs, device)
+        bev_hw = (samples[0].shape[-2], samples[0].shape[-1])
+        bev_world_meta = _prepare_bev_world_meta(batched_inputs, bev_hw, device)
 
         outputs = model(samples,
                         pano_images=pano_images,
                         pose_matrices=pose_matrices,
                         pano_counts=pano_counts,
-                        depth_images=depth_images)
+                        depth_images=depth_images,
+                        bev_world_meta=bev_world_meta)
         loss_dict = criterion(outputs, room_targets)
         weight_dict = criterion.weight_dict
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
@@ -147,12 +173,15 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
         room_targets = pad_gt_polys(gt_instances, model.num_queries_per_poly, device)
 
         pano_images, pose_matrices, pano_counts, depth_images = _prepare_pano_batch(batched_inputs, device)
+        bev_hw = (samples[0].shape[-2], samples[0].shape[-1])
+        bev_world_meta = _prepare_bev_world_meta(batched_inputs, bev_hw, device)
 
         outputs = model(samples,
                         pano_images=pano_images,
                         pose_matrices=pose_matrices,
                         pano_counts=pano_counts,
-                        depth_images=depth_images)
+                        depth_images=depth_images,
+                        bev_world_meta=bev_world_meta)
         loss_dict = criterion(outputs, room_targets)
         weight_dict = criterion.weight_dict
 
@@ -302,12 +331,15 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                     gt_sem_rich_path = os.path.join(output_dir, '{}_sem_rich_gt.png'.format(scene_ids[i]))
                     plot_semantic_rich_floorplan(gt_sem_rich, gt_sem_rich_path, prec=1, rec=1) 
 
+        bev_hw = (samples[0].shape[-2], samples[0].shape[-1])
+        bev_world_meta = _prepare_bev_world_meta(batched_inputs, bev_hw, device)
 
         outputs = model(samples,
                         pano_images=pano_images,
                         pose_matrices=pose_matrices,
                         pano_counts=pano_counts,
-                        depth_images=depth_images)
+                        depth_images=depth_images,
+                        bev_world_meta=bev_world_meta)
         pred_logits = outputs['pred_logits']
         pred_corners = outputs['pred_coords']
         fg_mask = torch.sigmoid(pred_logits) > 0.5

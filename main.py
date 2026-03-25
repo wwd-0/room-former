@@ -27,7 +27,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=10, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=500, type=int)
-    parser.add_argument('--lr_drop', default=[400], type=list)
+    parser.add_argument('--lr_drop', default=[400], type=int, nargs='+')
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
 
@@ -104,10 +104,16 @@ def get_args_parser():
     # depth maps
     parser.add_argument('--use_depth', action='store_true',
                         help="Load and use per-panorama depth maps (concatenated with RGB as 4ch input)")
+    parser.add_argument('--pano_backproject_bias', action='store_true',
+                        help="Panorama cross-attn: additive bias from equirectangular back-project "
+                             "(same as generate_pointcloud.world_to_pano_uv); requires bev_meta.json per scene")
+    parser.add_argument('--pano_backproject_sigma', default=64.0, type=float,
+                        help="Gaussian sigma in pano pixels for back-project attention bias")
 
     # loss
-    parser.add_argument('--no_aux_loss', dest='aux_loss', action='store_true',
+    parser.add_argument('--no_aux_loss', dest='aux_loss', action='store_false',
                         help="Disables auxiliary decoding losses (loss at each layer)")
+    parser.set_defaults(aux_loss=True)
 
     # matcher
     parser.add_argument('--set_cost_class', default=2, type=float,

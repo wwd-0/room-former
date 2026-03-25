@@ -77,7 +77,10 @@ class DeformableTransformer(nn.Module):
         return valid_ratio
 
     def forward(self, srcs, masks, pos_embeds, query_embed=None, tgt=None, tgt_masks=None,
-                pano_memory=None, pano_pos=None, pano_key_padding_mask=None):
+                pano_memory=None, pano_pos=None, pano_key_padding_mask=None,
+                pano_token_uv=None, pano_tokens_per_pano=None,
+                bev_world_meta=None, pose_matrices=None, pano_counts=None,
+                pano_image_hw=None, use_pano_geom_bias=False, pano_sigma=64.0):
         assert query_embed is not None
 
         # prepare input for encoder
@@ -118,7 +121,10 @@ class DeformableTransformer(nn.Module):
         hs, inter_references, inter_classes = self.decoder(
             tgt, reference_points, memory, src_flatten,
             spatial_shapes, level_start_index, valid_ratios, query_embed, mask_flatten, tgt_masks,
-            pano_memory=pano_memory, pano_pos=pano_pos, pano_key_padding_mask=pano_key_padding_mask)
+            pano_memory=pano_memory, pano_pos=pano_pos, pano_key_padding_mask=pano_key_padding_mask,
+            pano_token_uv=pano_token_uv, pano_tokens_per_pano=pano_tokens_per_pano,
+            bev_world_meta=bev_world_meta, pose_matrices=pose_matrices, pano_counts=pano_counts,
+            pano_image_hw=pano_image_hw, use_pano_geom_bias=use_pano_geom_bias, pano_sigma=pano_sigma)
 
         return hs, init_reference_out, inter_references, inter_classes
 
@@ -231,6 +237,32 @@ class DeformableTransformerDecoderLayer(nn.Module):
     def with_pos_embed(tensor, pos):
         return tensor if pos is None else tensor + pos
 
+    def _pano_cross_attn_forward(self, tgt, query_pos, mem, pos, attn_bias):
+        """Multi-head attention; optional additive attn_mask (equirectangular bias)."""
+        mha = self.pano_cross_attn
+        e_dim = tgt.shape[-1]
+        n_head = mha.num_heads
+        d_head = e_dim // n_head
+        b, l_q, _ = tgt.shape
+        s_k = mem.shape[1]
+        q_p = self.with_pos_embed(tgt, query_pos)
+        kv_p = self.with_pos_embed(mem, pos)
+        w = mha.in_proj_weight
+        b_proj = mha.in_proj_bias
+        q = F.linear(q_p, w[:e_dim], b_proj[:e_dim] if b_proj is not None else None)
+        k = F.linear(kv_p, w[e_dim:2 * e_dim], b_proj[e_dim:2 * e_dim] if b_proj is not None else None)
+        v = F.linear(mem, w[2 * e_dim:], b_proj[2 * e_dim:] if b_proj is not None else None)
+        q = q.view(b, l_q, n_head, d_head).transpose(1, 2)
+        k = k.view(b, s_k, n_head, d_head).transpose(1, 2)
+        v = v.view(b, s_k, n_head, d_head).transpose(1, 2)
+        am = attn_bias
+        if am is not None:
+            am = am.unsqueeze(1).expand(-1, n_head, -1, -1)
+        drop_p = self.pano_dropout.p if self.training else 0.0
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=am, dropout_p=drop_p)
+        out = out.transpose(1, 2).reshape(b, l_q, e_dim)
+        return mha.out_proj(out)
+
     def forward_ffn(self, tgt):
         tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt))))
         tgt = tgt + self.dropout4(tgt2)
@@ -239,7 +271,10 @@ class DeformableTransformerDecoderLayer(nn.Module):
 
     def forward(self, tgt, query_pos, reference_points, src, src_spatial_shapes,
                 level_start_index, src_padding_mask=None, tgt_masks=None,
-                pano_memory=None, pano_pos=None, pano_key_padding_mask=None):
+                pano_memory=None, pano_pos=None, pano_key_padding_mask=None,
+                ref_xy01=None, pano_token_uv=None, pano_tokens_per_pano=None,
+                bev_world_meta=None, pose_matrices=None, pano_counts=None,
+                pano_image_hw=None, use_pano_geom_bias=False, pano_sigma=64.0):
         # 1) self attention
         q = k = self.with_pos_embed(tgt, query_pos)
         tgt2 = self.self_attn(q.transpose(0, 1), k.transpose(0, 1), tgt.transpose(0, 1), attn_mask=tgt_masks)[0].transpose(0, 1)
@@ -253,14 +288,45 @@ class DeformableTransformerDecoderLayer(nn.Module):
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
 
-        # 3) panorama cross attention
+        # 3) panorama cross attention (optional equirectangular back-project bias)
         if self.pano_cross_attn is not None and pano_memory is not None:
-            q2 = self.with_pos_embed(tgt, query_pos).transpose(0, 1)
-            k2 = self.with_pos_embed(pano_memory, pano_pos).transpose(0, 1)
-            v2 = pano_memory.transpose(0, 1)
-            tgt2 = self.pano_cross_attn(
-                q2, k2, v2, key_padding_mask=pano_key_padding_mask
-            )[0].transpose(0, 1)
+            attn_bias = None
+            if (
+                use_pano_geom_bias
+                and ref_xy01 is not None
+                and bev_world_meta is not None
+                and pose_matrices is not None
+                and pano_counts is not None
+                and pano_token_uv is not None
+                and pano_tokens_per_pano is not None
+                and pano_image_hw is not None
+            ):
+                from util.pano_projector import (
+                    bev_norm_xy_to_world_xyz,
+                    world_to_pano_uv_torch,
+                    build_pano_attn_bias_from_uv,
+                )
+                Hp, Wp = int(pano_image_hw[0]), int(pano_image_hw[1])
+                world = bev_norm_xy_to_world_xyz(
+                    ref_xy01,
+                    bev_world_meta["origin_xz"],
+                    tuple(bev_world_meta["grid_hw"]),
+                    bev_world_meta["meters_per_pixel"],
+                    bev_world_meta.get("world_y"),
+                )
+                proj_uv, _, _ = world_to_pano_uv_torch(
+                    world, pose_matrices, Wp, Hp)
+                attn_bias = build_pano_attn_bias_from_uv(
+                    proj_uv,
+                    pano_token_uv,
+                    pano_counts,
+                    int(pano_tokens_per_pano),
+                    sigma_px=float(pano_sigma),
+                    key_padding_mask=pano_key_padding_mask,
+                )
+
+            tgt2 = self._pano_cross_attn_forward(
+                tgt, query_pos, pano_memory, pano_pos, attn_bias)
             tgt = tgt + self.pano_dropout(tgt2)
             tgt = self.pano_norm(tgt)
 
@@ -302,7 +368,10 @@ class DeformableTransformerDecoder(nn.Module):
 
     def forward(self, tgt, reference_points, src, src_flatten, src_spatial_shapes, src_level_start_index, src_valid_ratios,
                 query_pos=None, src_padding_mask=None, tgt_masks=None,
-                pano_memory=None, pano_pos=None, pano_key_padding_mask=None):
+                pano_memory=None, pano_pos=None, pano_key_padding_mask=None,
+                pano_token_uv=None, pano_tokens_per_pano=None,
+                bev_world_meta=None, pose_matrices=None, pano_counts=None,
+                pano_image_hw=None, use_pano_geom_bias=False, pano_sigma=64.0):
         output = tgt    # [10, 800, 256]
 
         intermediate = []
@@ -322,7 +391,12 @@ class DeformableTransformerDecoder(nn.Module):
             output = layer(output, query_pos, reference_points_input, src, src_spatial_shapes,
                            src_level_start_index, src_padding_mask, tgt_masks,
                            pano_memory=pano_memory, pano_pos=pano_pos,
-                           pano_key_padding_mask=pano_key_padding_mask)
+                           pano_key_padding_mask=pano_key_padding_mask,
+                           ref_xy01=reference_points,
+                           pano_token_uv=pano_token_uv, pano_tokens_per_pano=pano_tokens_per_pano,
+                           bev_world_meta=bev_world_meta, pose_matrices=pose_matrices,
+                           pano_counts=pano_counts, pano_image_hw=pano_image_hw,
+                           use_pano_geom_bias=use_pano_geom_bias, pano_sigma=pano_sigma)
     
             # iterative polygon refinement
             if self.poly_refine:

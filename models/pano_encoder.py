@@ -9,6 +9,8 @@ import torch
 import torch.nn as nn
 import torchvision
 
+from util.pano_projector import project_to_bev as project_bev_queries_to_panos
+
 
 class PanoEncoder(nn.Module):
     """Encode multiple panorama images into a flat token sequence."""
@@ -71,6 +73,22 @@ class PanoEncoder(nn.Module):
     def _extract_features(self, x):
         return self.proj(self.body(x))
 
+    def project_to_bev(self, pose_matrices, pano_counts, bev_points=None,
+                       bev_regions=None, world_query_xyz=None, bev_world_meta=None,
+                       depth_images=None, bev_size=None, pano_image_size=None):
+        """Public wrapper for BEV-to-panorama candidate lookup / 反投影 UV。"""
+        return project_bev_queries_to_panos(
+            pose_matrices=pose_matrices,
+            pano_counts=pano_counts,
+            bev_points=bev_points,
+            bev_regions=bev_regions,
+            world_query_xyz=world_query_xyz,
+            bev_world_meta=bev_world_meta,
+            depth_images=depth_images,
+            bev_size=bev_size,
+            pano_image_size=pano_image_size,
+        )
+
     def forward(self, pano_images, pose_matrices, pano_counts,
                 depth_images=None):
         """
@@ -84,9 +102,11 @@ class PanoEncoder(nn.Module):
             pano_tokens: (B, T, d_model)
             pano_pos:    (B, T, d_model)
             pano_mask:   (B, T)  True = padded
+            pano_token_uv: (B, T, 2) 各 token 在全景输入分辨率下的像素 (col, row)，与反投影一致
         """
         B, N_max, C, Hp, Wp = pano_images.shape
         device = pano_images.device
+        dtype = pano_images.dtype
 
         if self.use_depth and depth_images is not None:
             x = torch.cat([pano_images, depth_images], dim=2)  # (B, N, 4, Hp, Wp)
@@ -110,6 +130,15 @@ class PanoEncoder(nn.Module):
         pose_feat = self.pose_embed(pose_flat)
         pose_feat = pose_feat.unsqueeze(2).expand(-1, -1, tpp, -1)
 
+        cols = (torch.arange(w, device=device, dtype=torch.float32) + 0.5) / float(w) * float(Wp)
+        rows = (torch.arange(h, device=device, dtype=torch.float32) + 0.5) / float(h) * float(Hp)
+        try:
+            grid_r, grid_c = torch.meshgrid(rows, cols, indexing="ij")
+        except TypeError:
+            grid_r, grid_c = torch.meshgrid(rows, cols)
+        uv_local = torch.stack([grid_c, grid_r], dim=-1).reshape(1, 1, tpp, 2)
+        token_uv = uv_local.expand(B, N_max, tpp, 2).reshape(B, N_max * tpp, 2).to(dtype=dtype)
+
         T = N_max * tpp
         tokens_flat = tokens.reshape(B, T, d)
         pos_flat = pose_feat.reshape(B, T, d)
@@ -119,7 +148,7 @@ class PanoEncoder(nn.Module):
             n = int(pano_counts[b].item())
             mask[b, :n * tpp] = False
 
-        return tokens_flat, pos_flat, mask
+        return tokens_flat, pos_flat, mask, token_uv
 
 
 def build_pano_encoder(args):
