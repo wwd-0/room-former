@@ -128,7 +128,7 @@ def get_args_parser():
     parser.add_argument('--raster_loss_coef', default=1, type=float)
 
     # dataset parameters
-    parser.add_argument('--dataset_name', default='stru3d')
+    parser.add_argument('--dataset_name', default='custom')
     parser.add_argument('--dataset_root', default='data/stru3d', type=str)
 
     parser.add_argument('--output_dir', default='output',

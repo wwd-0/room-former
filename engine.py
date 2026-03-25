@@ -205,8 +205,13 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
                 curr_opts.scene_id = "scene_0" + str(scene_ids[i])
                 curr_data_rw = S3DRW(curr_opts, mode = "online_eval")
                 evaluator = Evaluator(curr_data_rw, curr_opts)
-            elif dataset_name == 'scenecad':
-                gt_polys = [gt_instances[i].gt_masks.polygons[0][0].reshape(-1,2).astype(np.int32)]
+            else:
+                # 'custom' / 'scenecad': 从已加载的 GT 中提取多边形，不依赖外部文件
+                gt_polys = []
+                for poly_list in gt_instances[i].gt_masks.polygons:
+                    pts = poly_list[0].reshape(-1, 2).astype(np.int32)
+                    if len(pts) >= 3:
+                        gt_polys.append(pts)
                 evaluator = Evaluator_SceneCAD()
             
             print("Running Evaluation for scene %s" % scene_ids[i])
@@ -252,7 +257,7 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
                                                             room_types=room_types, 
                                                             window_door_lines=window_doors, 
                                                             window_door_lines_types=window_doors_types)
-            elif dataset_name == 'scenecad':
+            else:
                 quant_result_dict_scene = evaluator.evaluate_scene(room_polys=room_polys, gt_polys=gt_polys)
 
             if 'room_iou' in quant_result_dict_scene:
