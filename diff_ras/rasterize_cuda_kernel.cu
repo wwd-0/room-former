@@ -412,7 +412,7 @@ std::vector<at::Tensor> forward_rasterize_cuda(
 
     if ((mode == MODE_MASK) || (mode == MODE_HARD_MASK)) {
       // determine whether each point is inside or outside.
-      AT_DISPATCH_FLOATING_TYPES(vertices.type(), "inside_outside_cuda", ([&] {
+      AT_DISPATCH_FLOATING_TYPES(vertices.scalar_type(), "inside_outside_cuda", ([&] {
             inside_outside_cuda_kernel<scalar_t><<<blocks, threads>>>(
               vertices.data<scalar_t>(),
               batch_size,
@@ -424,7 +424,7 @@ std::vector<at::Tensor> forward_rasterize_cuda(
     }
 
     if (mode != MODE_HARD_MASK) {
-        AT_DISPATCH_FLOATING_TYPES(vertices.type(), "forward_rasterize_cuda", ([&] {
+        AT_DISPATCH_FLOATING_TYPES(vertices.scalar_type(), "forward_rasterize_cuda", ([&] {
         forward_rasterize_cuda_kernel<scalar_t><<<blocks, threads>>>(
             vertices.data<scalar_t>(),
 	    batch_size,
@@ -461,7 +461,7 @@ at::Tensor backward_rasterize_cuda(
     const int threads = 512;
     const dim3 blocks ((batch_size * width * height - 1) / threads + 1);
 
-    AT_DISPATCH_FLOATING_TYPES(vertices.type(), "backward_rasterize_cuda", ([&] {
+    AT_DISPATCH_FLOATING_TYPES(vertices.scalar_type(), "backward_rasterize_cuda", ([&] {
       backward_rasterize_cuda_kernel<scalar_t><<<blocks, threads>>>(
           vertices.data<scalar_t>(),
           rasterized.data<scalar_t>(),
