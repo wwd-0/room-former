@@ -268,7 +268,7 @@ def main(args):
             for pg, pg_old in zip(optimizer.param_groups, p_groups):
                 pg['lr'] = pg_old['lr']
                 pg['initial_lr'] = pg_old['initial_lr']
-            print(optimizer.param_groups)
+            # Removed print(optimizer.param_groups) to stop console spam
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             args.override_resumed_lr_drop = False
             if args.override_resumed_lr_drop:
