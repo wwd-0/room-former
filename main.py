@@ -280,6 +280,7 @@ def main(args):
 
     print("Start training")
     start_time = time.time()
+    best_val_loss = float('inf')
 
     # (Visualization removed)
 
@@ -288,10 +289,25 @@ def main(args):
         train_stats = train_one_epoch(
             model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
         lr_scheduler.step()
+        test_stats = evaluate(
+            model, criterion, args.dataset_name, data_loader_val, device
+        )
+
+        # Track the best model based on validation loss
+        current_val_loss = test_stats['loss']
+        is_best = current_val_loss < best_val_loss
+        if is_best:
+            best_val_loss = current_val_loss
+            print(f"--> [Epoch {epoch}] New best validation loss: {best_val_loss:.4f}. Saving checkpoint_best.pth")
+
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             if (epoch + 1) in args.lr_drop or (epoch + 1) % 20 == 0:
                 checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
+            # Save an extra copy if it's the best performing epoch so far
+            if is_best:
+                checkpoint_paths.append(output_dir / 'checkpoint_best.pth')
+
             for checkpoint_path in checkpoint_paths:
                 torch.save({
                     'model': model.state_dict(),
@@ -300,10 +316,6 @@ def main(args):
                     'epoch': epoch,
                     'args': args,
                 }, checkpoint_path)
-
-        test_stats = evaluate(
-            model, criterion, args.dataset_name, data_loader_val, device
-        )
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},

@@ -157,7 +157,7 @@ class Evaluator_SceneCAD():
                         pred_overlaps[pred_ind2] = True
 
             # import pdb; pdb.set_trace()
-            room_metric = [np.bool((1 - pred_overlaps[ind]) * pred2gt_exists[ind]) for ind in range(len(pred_polys))]
+            room_metric = [bool((1 - pred_overlaps[ind]) * pred2gt_exists[ind]) for ind in range(len(pred_polys))]
 
             return room_metric
 
