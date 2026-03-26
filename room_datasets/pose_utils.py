@@ -21,7 +21,7 @@ def euler_position_to_matrix(rotation: tuple, position: tuple) -> np.ndarray:
         np.ndarray shape (4, 4)，dtype float32
     """
     rx, ry, rz = [math.radians(v) for v in rotation]
-    print("--",rx, ry, rz)
+    # print("--",rx, ry, rz)
     tx, ty, tz = position
     cx, sx = math.cos(rx), math.sin(rx)
     cy, sy = math.cos(ry), math.sin(ry)
