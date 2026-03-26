@@ -11,6 +11,8 @@ import wandb
 import torch
 from torch.utils.data import DataLoader
 import util.misc as utils
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from datasets import build_dataset
 from engine import evaluate, train_one_epoch
 from models import build_model
