@@ -296,7 +296,7 @@ def generate_scene_pointclouds(depth_dir, output_dir,
     Returns:
         results: list[dict]，每个点位的生成摘要
     """
-    from datasets.ply_utils import write_ply
+    from room_datasets.ply_utils import write_ply
 
     if scale is None:
         scale = parse_depth_scale(depth_dir)

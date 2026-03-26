@@ -220,8 +220,8 @@ def load_and_transform(viewdata_path, ply_dir):
         scan_names: list[str]，scan_id → 点位名称
         pose_matrices: list[np.ndarray]，scan_id → 4x4 位姿矩阵 (Twc)
     """
-    from datasets.pose_utils import parse_shoot_spots, compute_pose_matrices
-    from datasets.ply_utils import read_ply, apply_matrix_to_points
+    from room_datasets.pose_utils import parse_shoot_spots, compute_pose_matrices
+    from room_datasets.ply_utils import read_ply, apply_matrix_to_points
     from pathlib import Path
 
     with open(viewdata_path, "r", encoding="utf-8") as f:
