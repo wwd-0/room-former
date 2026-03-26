@@ -42,6 +42,13 @@ def world_to_pano_uv_torch(
     device = world_xyz.device
     dtype = world_xyz.dtype
 
+    # Replace zero-padded pose matrices with identity to avoid singular matrix error.
+    # Padding slots are masked out downstream by candidate_pano_mask / pano_counts,
+    # so the inversion result for those slots does not affect the output.
+    eye = torch.eye(4, device=pose_twc.device, dtype=pose_twc.dtype)
+    is_zero = (pose_twc.abs().sum(dim=(-2, -1)) == 0)  # (B, N)
+    pose_twc = pose_twc.clone()
+    pose_twc[is_zero] = eye
     tcw = torch.linalg.inv(pose_twc)  # (B, N, 4, 4)
     homo = torch.cat(
         [world_xyz, torch.ones(B, Q, 1, device=device, dtype=dtype)],
