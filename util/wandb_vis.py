@@ -11,7 +11,7 @@ import io
 import math
 import numpy as np
 import torch
-import wandb
+# import wandb removed
 
 try:
     import cv2
@@ -166,7 +166,7 @@ def log_prediction_images(
     num_polys: int,
     canvas_size: int = 256,
     max_scenes: int = 4,
-    wandb_key: str = "viz/predictions",
+    output_dir: str = None,
 ):
     """
     Run the model on the first `max_scenes` validation scenes, render
@@ -182,7 +182,7 @@ def log_prediction_images(
         num_polys:   args.num_polys
         canvas_size: pixel size of each panel (default 256)
         max_scenes:  how many scenes to visualise (default 4)
-        wandb_key:   WandB logging key (default "viz/predictions")
+        output_dir:  local directory to save images (default None)
     """
     from util.poly_ops import pad_gt_polys
     from engine import _prepare_pano_batch, _prepare_bev_world_meta
@@ -238,8 +238,10 @@ def log_prediction_images(
 
     # Stack all rows vertically into one tall image
     grid = np.concatenate(panel_rows, axis=0)
-    caption = (
-        f"Epoch {epoch} | Left: BEV map | Mid: GT rooms | Right: Predicted rooms\n"
-        f"({scene_count} scenes shown)"
-    )
-    wandb.log({wandb_key: wandb.Image(grid, caption=caption)}, step=epoch)
+    
+    if output_dir:
+        import os
+        from PIL import Image
+        out_path = os.path.join(output_dir, f"viz_epoch_{epoch:04d}.png")
+        Image.fromarray(grid).save(out_path)
+        print(f"---> Saved visualization to {out_path}")

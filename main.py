@@ -14,7 +14,7 @@ import util.misc as utils
 from room_datasets import build_dataset
 from engine import evaluate, train_one_epoch
 from models import build_model
-# from util.wandb_vis import log_prediction_images
+from util.wandb_vis import log_prediction_images
 
 
 
@@ -282,7 +282,22 @@ def main(args):
     start_time = time.time()
     best_val_loss = float('inf')
 
-    # (Visualization removed)
+    # ── Initial visualization (baseline or resumed checkpoint state) ─────────
+    is_resumed = args.start_epoch > 0
+    vis_epoch  = args.start_epoch - 1 if is_resumed else -1
+    vis_label  = f"resumed from epoch {args.start_epoch - 1}" if is_resumed else "baseline (before training)"
+    if args.output_dir:
+        print(f"Generating initial prediction visualization [{vis_label}] ...")
+        log_prediction_images(
+            model=model,
+            data_loader=data_loader_val,
+            device=device,
+            epoch=vis_epoch,
+            num_polys=args.num_polys,
+            canvas_size=256,
+            max_scenes=4,
+            output_dir=args.output_dir,
+        )
 
     for epoch in range(args.start_epoch, args.epochs):
 
@@ -361,7 +376,18 @@ def main(args):
         if 'room_iou' in test_stats:
             val_log_dict["val_metrics/room_iou"] = test_stats['room_iou']
 
-        # wandb.log and visualization removed
+        # ── Visualize predicted floor plans every 5 epochs ──────────────────
+        if args.output_dir and (epoch + 1) % 5 == 0:
+            log_prediction_images(
+                model=model,
+                data_loader=data_loader_val,
+                device=device,
+                epoch=epoch,
+                num_polys=args.num_polys,
+                canvas_size=256,
+                max_scenes=4,
+                output_dir=args.output_dir,
+            )
 
         if args.output_dir:
             with (output_dir / "log.txt").open("a") as f:
