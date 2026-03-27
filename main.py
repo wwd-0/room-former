@@ -426,8 +426,8 @@ def main(args):
         if 'room_iou' in test_stats:
             val_log_dict["val_metrics/room_iou"] = test_stats['room_iou']
 
-        # ── Visualize predicted floor plans every 5 epochs ──────────────────
-        if args.output_dir and (epoch + 1) % 5 == 0:
+        # ── Visualize predicted floor plans every 10 epochs ──────────────────
+        if args.output_dir and (epoch + 1) % 10 == 0:
             log_prediction_images(
                 model=model,
                 data_loader=data_loader_val,
