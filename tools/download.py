@@ -18,7 +18,7 @@ class Url:
 		self.login_url = 'https://passport.58corp.com/login?service=https%3A%2F%2Faihouse.58corp.com%2F'
 		self.aihouse_url = "https://aihouse.58corp.com/report/byid"
 		# 完整 Cookie 头字符串；None 时首次请求会调用 readCookies() 填充。也可在运行期直接赋值以动态更新。
-		self.cookie_string = 'xxzlclientid=727a7e1d-08d2-47df-b164-1774582600521; xxzlxxid=pfmxbuGWwvZwEB4IxXDh0xpmec1F5H9At+0Hc6PEXO9nM75OzISzxl1oJp61soSV3S3g; xxzlbbid=pfmbRLroKy6LV9IcmyzqUYHsCt6N1loWpFzHkBUeu8+CL0nxGIKVGgkuerpN2dCgNmSZJ7uU/Auv6ncLzJ1B7/ZEgLCJtCvK5P9G6zT9I9cmShSuVj015MVUJ0RcswLKRDbm55FV/yIxNzc0NTgyNjAyOTMxODkz_1; dunCookie=69db01dcd6a19623cf0df9dedb0203ebc98397e67365e29bcffb6f75b2301d5b4e81cc4624e41c73; SSO_SESSION_ID=ST-1630203-PNybt1NyQhJw0kLbbWlh-passport-58corp-com'
+		self.cookie_string = 'xxzlclientid=727a7e1d-08d2-47df-b164-1774582600521; xxzlxxid=pfmxbuGWwvZwEB4IxXDh0xpmec1F5H9At+0Hc6PEXO9nM75OzISzxl1oJp61soSV3S3g; xxzlbbid=pfmbRLroKy6LV9IcmyzqUYHsCt6N1loWpFzHkBUeu8+CL0nxGIKVGgkuerpN2dCgNmSZJ7uU/Auv6ncLzJ1B7/ZEgLCJtCvK5P9G6zT9I9cmShSuVj015MVUJ0RcswLKRDbm55FV/yIxNzc0NTgyNjAyOTMxODkz_1; dunCookie=69db01dcd6a19623cf0df9dedb0203ebc98397e67365e29bcffb6f75b2301d5b4e81cc4624e41c73; SSO_SESSION_ID=ST-1645978-IX9IbhSeSUchGNEdNgas-passport-58corp-com'
 		self.headers = None
 
 	@staticmethod

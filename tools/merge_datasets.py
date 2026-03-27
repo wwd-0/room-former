@@ -58,11 +58,16 @@ def merge_coco_json(json_a, json_b, out_json):
         ann['id'] += max_ann_id
         new_annos.append(ann)
 
+    # 确保选取最全的类别列表（以防其中一个是 16 类，另一个是 20 类）
+    cats_a = data_a.get('categories', [])
+    cats_b = data_b.get('categories', [])
+    merged_categories = cats_a if len(cats_a) >= len(cats_b) else cats_b
+
     # 合并
     merged_data = {
         "images": data_a.get('images', []) + new_images,
         "annotations": data_a.get('annotations', []) + new_annos,
-        "categories": data_a.get('categories', []),
+        "categories": merged_categories,
         "info": {"description": "Merged Dataset", "split": data_a.get('info', {}).get('split', 'unknown')}
     }
 

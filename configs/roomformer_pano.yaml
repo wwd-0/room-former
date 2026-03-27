@@ -22,6 +22,7 @@ pano_input_h: 256
 pano_input_w: 512
 
 # 3. 模型架构设置
+semantic_classes: 20
 num_queries: 800
 num_polys: 20
 dec_layers: 6

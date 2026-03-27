@@ -170,8 +170,28 @@ def _load_gt_from_viewdata(
 
     annos: List[Dict[str, Any]] = []
 
+    def _map_room_name_to_id(name: str) -> int:
+        if not name: return 15
+        if '客' in name and '厅' in name: return 0
+        if '厨' in name: return 1
+        if '卧' in name or '儿童房' in name or '老人房' in name: return 2
+        if '卫' in name or '厕' in name or '洗手' in name or '浴' in name: return 3
+        if '阳台' in name or '露台' in name: return 4
+        if '走廊' in name or '过道' in name or '玄关' in name: return 5
+        if '餐' in name: return 6
+        if '书房' in name: return 7
+        if '工作室' in name: return 8
+        if '衣帽' in name or '储' in name or '杂物' in name: return 9
+        if '花园' in name or '庭院' in name: return 10
+        if '洗衣' in name: return 11
+        if '办公' in name: return 12
+        if '地下' in name: return 13
+        if '车' in name: return 14
+        return 15
+
     for room in rooms:
         info = room.get("Info", {})
+        room_name = info.get("Name", "") or room.get("Name", "") or room.get("RoomName", "")
         pos = info.get("Position", {})
         room_px = float(pos.get("x", 0.0))
         room_pz = float(pos.get("z", 0.0))
@@ -202,18 +222,28 @@ def _load_gt_from_viewdata(
                     x, y = poly.exterior.coords.xy
                     ring = np.column_stack([x[:-1], y[:-1]])
                     flat = ring.reshape(-1).tolist()
+                    
+                    cat_id = 0
+                    if semantic_rich:
+                        cat_id = _map_room_name_to_id(room_name)
+
                     annos.append({
                         "segmentation": [flat],
                         "area": float(poly.area),
                         "iscrowd": 0,
                         "bbox": _poly_bbox_from_pts(ring, img_w, img_h),
-                        "category_id": 0 if not semantic_rich else 15,
+                        "category_id": cat_id,
                     })
 
         if semantic_rich:
-            for key, cat_id in [("Doors", 16), ("Windows", 17)]:
+            for key, base_cat_id in [("Doors", 16), ("Windows", 17)]:
                 for obj in room.get(key, []):
                     try:
+                        # 区分真门和门洞（OpenArea）
+                        current_cat_id = base_cat_id
+                        if key == "Doors" and obj.get("Type", "Door") == "OpenArea":
+                            current_cat_id = 18
+
                         s = obj["Start"]["Up"]["Position"]
                         e = obj["End"]["Up"]["Position"]
                         sxp, syp = _to_bev_px(float(s["x"]), float(s["z"]), room_px, room_pz)
@@ -225,7 +255,7 @@ def _load_gt_from_viewdata(
                             "area": 1.0,
                             "iscrowd": 0,
                             "bbox": _poly_bbox_from_pts(line_pts, img_w, img_h, pad=1.0),
-                            "category_id": cat_id,
+                            "category_id": current_cat_id,
                         })
                     except Exception:
                         continue
@@ -240,7 +270,7 @@ def _default_categories(semantic_rich: bool) -> List[Dict[str, Any]]:
     names = [
         "living room", "kitchen", "bedroom", "bathroom", "balcony", "corridor",
         "dining room", "study", "studio", "store room", "garden", "laundry room",
-        "office", "basement", "garage", "undefined", "door", "window",
+        "office", "basement", "garage", "undefined", "door", "window", "doorway"
     ]
     return [{"supercategory": "room", "id": i, "name": n} for i, n in enumerate(names)]
 
