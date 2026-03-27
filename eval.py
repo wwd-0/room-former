@@ -65,6 +65,37 @@ def get_args_parser():
                         1. default -1 means non-semantic floorplan \
                         2. 19 for Structured3D: 16 room types + 1 door + 1 window + 1 empty")
 
+    # panorama cross-attention
+    parser.add_argument('--use_pano', action='store_true',
+                        help="Enable panorama cross-attention in the decoder")
+    parser.add_argument('--pano_dir', default=None, type=str,
+                        help="Directory containing panorama sub-dirs per scene")
+    parser.add_argument('--pano_backbone', default='resnet18', type=str,
+                        help="Backbone for panorama encoder")
+    parser.add_argument('--pano_input_h', default=256, type=int,
+                        help="Panorama input height (resize to)")
+    parser.add_argument('--pano_input_w', default=512, type=int,
+                        help="Panorama input width (resize to)")
+    parser.add_argument('--max_pano_count', default=10, type=int,
+                        help="Max panoramas per scene (clip if more)")
+    parser.add_argument('--freeze_pano_backbone', action='store_true',
+                        help="Freeze panorama encoder backbone weights")
+    parser.add_argument('--pano_grad_ckpt', action='store_true',
+                        help="Use gradient checkpointing for panorama encoder (save memory)")
+    parser.add_argument('--lr_pano', default=2e-4, type=float,
+                        help="Learning rate for panorama encoder trainable params")
+
+    # BEV input
+    parser.add_argument('--bev_channels', default=3, type=int,
+                        help="BEV input channels (1=grayscale density, 3=pseudo-color RGB)")
+    # depth maps
+    parser.add_argument('--use_depth', action='store_true',
+                        help="Load and use per-panorama depth maps (concatenated with RGB as 4ch input)")
+    parser.add_argument('--pano_backproject_bias', action='store_true',
+                        help="Panorama cross-attn: additive bias from equirectangular back-project")
+    parser.add_argument('--pano_backproject_sigma', default=64.0, type=float,
+                        help="Sigma for backproject bias gaussian window")
+
     # aux
     parser.add_argument('--no_aux_loss', dest='aux_loss', action='store_true',
                         help="Disables auxiliary decoding losses (loss at each layer)")
