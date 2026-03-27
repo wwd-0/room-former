@@ -3,7 +3,7 @@
 
 # 1. 基础训练设置
 dataset_name: custom
-dataset_root: ../dataset_v3
+dataset_root: ../mnt_win/dataset_v3
 batch_size: 1
 epochs: 500
 lr: 0.0002
@@ -36,4 +36,4 @@ raster_loss_coef: 1.0
 room_cls_loss_coef: 0.2
 
 # 5. 断点续训 (如需接着之前的训练跑，在此填入路径)
-resume: ../models/checkpoint_best.pth
+resume: ../models/checkpoint.pth

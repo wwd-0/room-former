@@ -1,4 +1,4 @@
-pip install -r requirements.txt 
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 cd models/ops
 bash make.sh
 cd ../../diff_ras
