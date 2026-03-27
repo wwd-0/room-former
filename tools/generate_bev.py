@@ -27,12 +27,18 @@ import os
 import sys
 import argparse
 import json
-
 import numpy as np
+from pathlib import Path
 
-ROOMFORMER_ROOT = os.path.dirname(os.path.abspath(__file__))
-if ROOMFORMER_ROOT not in sys.path:
-    sys.path.insert(0, ROOMFORMER_ROOT)
+
+# 路径修复（必须放最前面）
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+
+# 导入工具
+from room_datasets.pose_utils import parse_shoot_spots, compute_pose_matrices
+from room_datasets.ply_utils import read_ply, apply_matrix_to_points
 
 METERS_PER_PIXEL = 0.02  # 1 px = 2 cm
 
@@ -220,9 +226,6 @@ def load_and_transform(viewdata_path, ply_dir):
         scan_names: list[str]，scan_id → 点位名称
         pose_matrices: list[np.ndarray]，scan_id → 4x4 位姿矩阵 (Twc)
     """
-    from room_datasets.pose_utils import parse_shoot_spots, compute_pose_matrices
-    from room_datasets.ply_utils import read_ply, apply_matrix_to_points
-    from pathlib import Path
 
     with open(viewdata_path, "r", encoding="utf-8") as f:
         data = json.load(f)

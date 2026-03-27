@@ -47,6 +47,18 @@ def _copytree_or_link(src: str, dst: str, use_symlink: bool) -> None:
             _copy_or_link(s, d, use_symlink)
 
 
+def _remove_source_scene(scene_path: str, scenes_root: str) -> None:
+    """删除已处理完的原始场景目录，释放磁盘（仅当路径在 scenes_root 之下时执行）。"""
+    root = os.path.abspath(scenes_root)
+    path = os.path.abspath(scene_path)
+    if path == root or not path.startswith(root + os.sep):
+        print(f"[WARN] 拒绝删除源目录（不在 --scenes-root 之下）: {scene_path}")
+        return
+    if not os.path.isdir(path):
+        return
+    shutil.rmtree(path)
+
+
 def _discover_scenes(scenes_root: str) -> List[str]:
     root = Path(scenes_root)
     if not root.is_dir():
@@ -422,6 +434,8 @@ def main():
     p.add_argument("--gen-ply", action="store_true",
                    help="强制从 images_depth 重新生成点云；默认仅在缺少 ply 时自动生成")
     p.add_argument("--symlink", action="store_true", help="全景/深度用软链")
+    p.add_argument("--delete-source", action="store_true",
+                   help="每场成功导出后删除该场景在 --scenes-root 下的原始目录，节省磁盘；与 --symlink 互斥")
     p.add_argument("--semantic-categories", action="store_true",
                    help="COCO categories 使用 19 类 Structured3D 语义表")
     p.add_argument("--gt-name", type=str, default="floorplan_gt.json",
@@ -429,6 +443,10 @@ def main():
     p.add_argument("--allow-empty-gt", action="store_true",
                    help="允许无 floorplan_gt.json 的场景仍写入图像（标注为空）")
     args = p.parse_args()
+
+    if args.delete_source and args.symlink:
+        print("[ERROR] --delete-source 与 --symlink 不能同时使用（删除源会破坏软链）")
+        sys.exit(1)
 
     scenes = _discover_scenes(args.scenes_root)
     if not scenes:
@@ -504,6 +522,10 @@ def main():
 
         bucket.append((rel, sid, w, h, anns))
         print(f"[OK] {sid} -> {scene_out}  ({w}x{h}, {len(anns)} annos)")
+
+        if args.delete_source:
+            _remove_source_scene(scene_path, args.scenes_root)
+            print(f"[INFO] {sid}: 已删除源场景目录以释放空间")
 
     for s in train_scenes:
         handle_split(s, train_dir, train_entries)
