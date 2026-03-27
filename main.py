@@ -3,8 +3,10 @@ import datetime
 import json
 import random
 import os
+import sys
 import time
 from pathlib import Path
+from typing import Any, Dict, Set
 
 import numpy as np
 # import wandb removed
@@ -144,6 +146,44 @@ def get_args_parser():
     parser.add_argument('--job_name', default='train_stru3d', type=str)
 
     return parser
+
+
+def _parser_dest_names(parser: argparse.ArgumentParser) -> Set[str]:
+    return {
+        a.dest
+        for a in parser._actions
+        if a.dest not in ("help", argparse.SUPPRESS)
+    }
+
+
+def _load_config_dict(path: str) -> Dict[str, Any]:
+    try:
+        from omegaconf import OmegaConf
+    except ImportError:
+        print(
+            "ERROR: 需要 omegaconf 以读取 YAML 配置（pip install omegaconf）",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    cfg = OmegaConf.load(path)
+    out = OmegaConf.to_container(cfg, resolve=True)
+    if out is None:
+        return {}
+    if not isinstance(out, dict):
+        raise ValueError(f"配置文件根节点必须是字典: {path}")
+    return out
+
+
+def _apply_yaml_to_namespace(parser: argparse.ArgumentParser, path: str, ns: argparse.Namespace) -> None:
+    data = _load_config_dict(path)
+    known = _parser_dest_names(parser)
+    for key, value in data.items():
+        if key == "config":
+            continue
+        if key not in known:
+            print(f"[WARN] 配置文件中有未识别的参数，已忽略: {key}")
+            continue
+        setattr(ns, key, value)
 
 
 def main(args):
@@ -399,13 +439,42 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('RoomFormer training script', parents=[get_args_parser()])
-    args = parser.parse_args()
+    _pre = argparse.ArgumentParser(add_help=False)
+    _pre.add_argument('--config', type=str, default=None,
+                      help='YAML 超参数文件路径')
+    _pre_args, _argv_rest = _pre.parse_known_args()
+
+    parser = argparse.ArgumentParser(
+        'RoomFormer training script',
+        parents=[get_args_parser()],
+        epilog='可用 --config xxx.yaml 指定训练参数；命令行参数会覆盖 YAML 中的同名项。',
+    )
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help='YAML 超参数（键名与命令行参数一致，不含前缀 --）；命令行优先覆盖',
+    )
+
+    ns = argparse.Namespace()
+    config_path = _pre_args.config
+    if config_path:
+        _apply_yaml_to_namespace(parser, config_path, ns)
+        print(f"[INFO] 已从 YAML 加载训练参数: {os.path.abspath(config_path)}")
+
+    args = parser.parse_args(_argv_rest, namespace=ns)
+    args.config = config_path
+
     now = datetime.datetime.now()
     run_id = now.strftime("%Y-%m-%d-%H-%M-%S")
     args.run_name = run_id+'_'+args.job_name 
     args.output_dir = os.path.join(args.output_dir, args.run_name)
-
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+        # 存档：备份本次训练所用的 YAML 配置文件到输出目录
+        if config_path:
+            import shutil
+            shutil.copy2(config_path, os.path.join(args.output_dir, "config.yaml"))
+            print(f"[INFO] 已备份配置文件到: {os.path.join(args.output_dir, 'config.yaml')}")
+
     main(args)

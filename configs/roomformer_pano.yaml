@@ -1,0 +1,39 @@
+# RoomFormer Panorama Training Configuration
+# 使用方法: python main.py --config configs/roomformer_pano.yaml
+
+# 1. 基础训练设置
+dataset_name: custom
+dataset_root: ../dataset_v3
+batch_size: 1
+epochs: 500
+lr: 0.0002
+lr_drop: [400]
+num_workers: 4
+seed: 42
+output_dir: ../output
+job_name: room_pano_run
+
+# 2. 全景图 (Panorama) 加固设置
+use_pano: true
+pano_backproject_bias: true
+pano_backproject_sigma: 64.0
+max_pano_count: 10
+pano_input_h: 256
+pano_input_w: 512
+
+# 3. 模型架构设置
+num_queries: 800
+num_polys: 20
+dec_layers: 6
+enc_layers: 6
+hidden_dim: 256
+nheads: 8
+
+# 4. 损失函数权重 (与原论文对齐)
+cls_loss_coef: 2.0
+coords_loss_coef: 5.0
+raster_loss_coef: 1.0
+room_cls_loss_coef: 0.2
+
+# 5. 断点续训 (如需接着之前的训练跑，在此填入路径)
+resume: ../models/checkpoint_best.pth
