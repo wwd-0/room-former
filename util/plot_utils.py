@@ -120,7 +120,7 @@ def plot_floorplan_with_regions(regions, corners=None, edges=None, scale=256):
     if len(regions) > 1:
         avg_corner = [region.mean(axis=0) for region in regions]
         ind = np.argsort(np.square(np.array(avg_corner)).sum(axis=1), axis=0)
-        regions = np.array(regions)[ind]
+        regions = [regions[i] for i in ind]
 
     for idx, polygon in enumerate(regions):
         cv2.fillPoly(room_map, [polygon], color=idx + 1)
