@@ -412,12 +412,16 @@ def main(args):
                 }
 
         if args.semantic_classes > 0:
-            train_log_dict["train/loss_ce_room"] = train_stats['loss_ce_room']
-            val_log_dict["val/loss_ce_room"] = test_stats['loss_ce_room']
-            val_log_dict["val_metrics/room_sem_prec"] = test_stats['room_sem_prec']
-            val_log_dict["val_metrics/room_sem_rec"] = test_stats['room_sem_rec']
-            val_log_dict["val_metrics/window_door_prec"] = test_stats['window_door_prec']
-            val_log_dict["val_metrics/window_door_rec"] = test_stats['window_door_rec']
+            if 'loss_ce_room' in train_stats:
+                train_log_dict["train/loss_ce_room"] = train_stats['loss_ce_room']
+            if 'loss_ce_room' in test_stats:
+                val_log_dict["val/loss_ce_room"] = test_stats['loss_ce_room']
+                
+            if 'room_sem_prec' in test_stats:
+                val_log_dict["val_metrics/room_sem_prec"] = test_stats['room_sem_prec']
+                val_log_dict["val_metrics/room_sem_rec"] = test_stats['room_sem_rec']
+                val_log_dict["val_metrics/window_door_prec"] = test_stats['window_door_prec']
+                val_log_dict["val_metrics/window_door_rec"] = test_stats['window_door_rec']
 
         else:
             train_log_dict["train/loss_raster"] = train_stats['loss_raster']

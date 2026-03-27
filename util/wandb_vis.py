@@ -77,71 +77,110 @@ def _draw_polys(canvas: np.ndarray, polys, color, thickness=2, fill_alpha=0.15):
     return canvas
 
 
+def _draw_lines(canvas: np.ndarray, line_list, color, thickness=3):
+    if not HAS_CV2:
+        return canvas
+    bgr = color[::-1]
+    for pts in line_list:
+        cv2.polylines(canvas, [pts], isClosed=False, color=bgr, thickness=thickness)
+    return canvas
+
+
 def _extract_pred_polys(outputs, sample_idx: int, num_polys: int, min_area: float = 100.0):
-    """Extract predicted room polygons from model output for one scene."""
+    """Extract predicted room polygons and structural lines (doors/windows)."""
     pred_logits = outputs['pred_logits']   # (B, P, Q, 1)
     pred_coords = outputs['pred_coords']   # (B, P, Q, 2)
+    
+    is_semantic = 'pred_room_logits' in outputs
+    if is_semantic:
+        pred_labels = outputs['pred_room_logits'][sample_idx].argmax(-1).cpu().numpy()
 
-    fg_mask = torch.sigmoid(pred_logits[sample_idx]) > 0.5  # (P, Q, 1) or (P, Q)
+    fg_mask = torch.sigmoid(pred_logits[sample_idx]) > 0.5
     if fg_mask.dim() == 3:
         fg_mask = fg_mask.squeeze(-1)
 
     room_polys = []
+    other_lines = []
     for j in range(fg_mask.shape[0]):
-        valid = fg_mask[j]                          # (Q,)
-        corners = pred_coords[sample_idx, j][valid]  # (K, 2)
-        if len(corners) < 3:
+        valid = fg_mask[j]
+        corners = pred_coords[sample_idx, j][valid]
+        if len(corners) < 2:
             continue
         pts = (corners.cpu().float() * 255).numpy().astype(np.int32)
-        if HAS_SHAPELY and len(pts) >= 3:
-            try:
-                if Polygon(pts).area < min_area:
-                    continue
-            except Exception:
-                pass
-        room_polys.append(pts)
-    return room_polys
+        
+        cat_id = pred_labels[j] if is_semantic else 0
+        if cat_id in [16, 17, 18]:
+            if len(pts) >= 2:
+                other_lines.append((pts, cat_id))
+        else:
+            if len(pts) >= 3:
+                if not HAS_SHAPELY:
+                    room_polys.append((pts, cat_id))
+                else:
+                    try:
+                        if Polygon(pts).area >= min_area:
+                            room_polys.append((pts, cat_id))
+                    except Exception:
+                        pass
+    return room_polys, other_lines
 
 
 def _extract_gt_polys(gt_instance):
-    """Extract GT polygons from a detectron2 Instances object."""
-    polys = []
-    for poly_list in gt_instance.gt_masks.polygons:
+    """Extract GT room polygons and structural lines."""
+    room_polys = []
+    other_lines = []
+    classes = gt_instance.gt_classes.cpu().numpy() if hasattr(gt_instance, 'gt_classes') else None
+    
+    for i, poly_list in enumerate(gt_instance.gt_masks.polygons):
         pts = poly_list[0].reshape(-1, 2).astype(np.int32)
-        if len(pts) >= 3:
-            polys.append(pts)
-    return polys
+        cat_id = classes[i] if classes is not None else 0
+        if cat_id in [16, 17, 18]:
+            if len(pts) >= 2:
+                other_lines.append((pts, cat_id))
+        elif len(pts) >= 3:
+            room_polys.append((pts, cat_id))
+    return room_polys, other_lines
 
 
 def render_comparison(
     bev_tensor: torch.Tensor,
-    gt_polys,
-    pred_polys,
+    gt_data,
+    pred_data,
     scene_id,
     canvas_size: int = 256,
 ) -> np.ndarray:
     """
-    Returns a (canvas_size, canvas_size*3, 3) uint8 RGB image:
-      [BEV Map | GT polygons | Predicted polygons]
+    Returns a (canvas_size, canvas_size*3, 3) uint8 RGB image
     """
     bev_img = _make_canvas(bev_tensor, canvas_size)
+    
+    gt_rooms, gt_others = gt_data
+    pred_rooms, pred_others = pred_data
+    
+    def _get_line_color(cat_id):
+        if cat_id == 16: return (255, 0, 0)     # 门 = Red
+        if cat_id == 17: return (0, 0, 255)     # 窗 = Blue
+        return (255, 0, 255)                    # 门洞 = Magenta
 
-    # GT panel: white background
+    # GT panel
     gt_canvas = np.ones((canvas_size, canvas_size, 3), dtype=np.uint8) * 240
-    for i, pts in enumerate(gt_polys):
+    for i, (pts, cat_id) in enumerate(gt_rooms):
         _draw_polys(gt_canvas, [pts], _PALETTE[i % len(_PALETTE)], thickness=2)
+    for pts, cat_id in gt_others:
+        _draw_lines(gt_canvas, [pts], _get_line_color(cat_id), thickness=3)
 
-    # Pred panel: white background
+    # Pred panel
     pred_canvas = np.ones((canvas_size, canvas_size, 3), dtype=np.uint8) * 240
-    for i, pts in enumerate(pred_polys):
+    for i, (pts, cat_id) in enumerate(pred_rooms):
         _draw_polys(pred_canvas, [pts], _PALETTE[i % len(_PALETTE)], thickness=2)
+    for pts, cat_id in pred_others:
+        _draw_lines(pred_canvas, [pts], _get_line_color(cat_id), thickness=3)
 
-    # Add text labels if cv2 available
     if HAS_CV2:
         font = cv2.FONT_HERSHEY_SIMPLEX
         cv2.putText(bev_img,     f'BEV #{scene_id}', (4, 18), font, 0.45, (220,220,220), 1)
-        cv2.putText(gt_canvas,   f'GT  #{scene_id} ({len(gt_polys)} rooms)', (4, 18), font, 0.4, ( 50, 50, 50), 1)
-        cv2.putText(pred_canvas, f'Pred ({len(pred_polys)} rooms)', (4, 18), font, 0.45, ( 50, 50, 50), 1)
+        cv2.putText(gt_canvas,   f'GT  #{scene_id} ({len(gt_rooms)} R, {len(gt_others)} DW)', (4, 18), font, 0.4, (50, 50, 50), 1)
+        cv2.putText(pred_canvas, f'Pred ({len(pred_rooms)} R, {len(pred_others)} DW)', (4, 18), font, 0.4, (50, 50, 50), 1)
 
     # Convert BGR → RGB for wandb
     if HAS_CV2:
