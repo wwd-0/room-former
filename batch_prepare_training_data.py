@@ -573,6 +573,8 @@ def main():
         json.dump(train_coco, f, ensure_ascii=False)
     with open(os.path.join(ann_dir, "val.json"), "w", encoding="utf-8") as f:
         json.dump(val_coco, f, ensure_ascii=False)
+    with open(os.path.join(ann_dir, "test.json"), "w", encoding="utf-8") as f:
+        json.dump(val_coco, f, ensure_ascii=False)
 
     readme = os.path.join(out_root, "README_dataset.txt")
     with open(readme, "w", encoding="utf-8") as f:
@@ -590,6 +592,7 @@ def main():
           f"annos={len(train_coco['annotations'])}")
     print(f"  annotations/val.json    images={len(val_coco['images'])}  "
           f"annos={len(val_coco['annotations'])}")
+    print(f"  annotations/test.json   (copied from val.json)")
     if skipped:
         print(f"  失败/跳过: {len(skipped)} 条")
 
