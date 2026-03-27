@@ -136,6 +136,8 @@ def main(args):
         print('Unexpected Keys: {}'.format(unexpected_keys))
 
     save_dir = os.path.join(os.path.dirname(args.checkpoint), output_dir)
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"Saving floorplan visualizations to: {save_dir}")
     evaluate_floor(
                    model, args.dataset_name, data_loader_eval, 
                    device, save_dir, 
