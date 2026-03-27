@@ -413,7 +413,7 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
                                                             window_door_lines=window_doors, 
                                                             window_door_lines_types=window_doors_types)
     
-            elif dataset_name == 'scenecad':
+            elif dataset_name in ('scenecad', 'custom'):
                 quant_result_dict_scene = evaluator.evaluate_scene(room_polys=room_polys, gt_polys=gt_polys)
 
             if quant_result_dict is None:
