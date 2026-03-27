@@ -270,7 +270,7 @@ def evaluate(model, criterion, dataset_name, data_loader, device):
             metric_logger.update(angles_prec=quant_result_dict_scene['angles_prec'])
             metric_logger.update(angles_rec=quant_result_dict_scene['angles_rec'])
 
-            if semantic_rich:
+            if semantic_rich and 'room_sem_prec' in quant_result_dict_scene:
                 metric_logger.update(room_sem_prec=quant_result_dict_scene['room_sem_prec'])
                 metric_logger.update(room_sem_rec=quant_result_dict_scene['room_sem_rec'])
                 metric_logger.update(window_door_prec=quant_result_dict_scene['window_door_prec'])
