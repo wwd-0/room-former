@@ -37,3 +37,6 @@ room_cls_loss_coef: 0.2
 
 # 5. 断点续训 (如需接着之前的训练跑，在此填入路径)
 resume: ../models/checkpoint_best.pth
+
+# 6. 强制从 epoch 0 开始训练（忽略 checkpoint 中的 epoch 信息）
+reset_epoch: true

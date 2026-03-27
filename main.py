@@ -140,6 +140,8 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--reset_epoch', action='store_true',
+                        help='If true, training starts from epoch 0 even if checkpoint has a different value')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=2, type=int)
@@ -313,7 +315,15 @@ def main(args):
                 lr_scheduler.step_size = args.lr_drop
                 lr_scheduler.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
             lr_scheduler.step(lr_scheduler.last_epoch)
-            args.start_epoch = checkpoint['epoch'] + 1
+            if args.reset_epoch:
+                args.start_epoch = 0
+                print('[INFO] args.reset_epoch is True: resetting start_epoch to 0.')
+            else:
+                args.start_epoch = checkpoint['epoch'] + 1
+        else:
+            if args.reset_epoch:
+                args.start_epoch = 0
+                print('[INFO] args.reset_epoch is True: resetting start_epoch to 0 (no epoch found in checkpoint).')
         test_stats = evaluate(
             model, criterion, args.dataset_name, data_loader_val, device
         )
