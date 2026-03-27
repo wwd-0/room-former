@@ -300,7 +300,7 @@ def main(args):
             print('Missing Keys: {}'.format(missing_keys))
         if len(unexpected_keys) > 0:
             print('Unexpected Keys: {}'.format(unexpected_keys))
-        if 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
+        if (not args.reset_epoch) and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             import copy
             p_groups = copy.deepcopy(optimizer.param_groups)
             optimizer.load_state_dict(checkpoint['optimizer'])
@@ -315,15 +315,15 @@ def main(args):
                 lr_scheduler.step_size = args.lr_drop
                 lr_scheduler.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
             lr_scheduler.step(lr_scheduler.last_epoch)
-            if args.reset_epoch:
-                args.start_epoch = 0
-                print('[INFO] args.reset_epoch is True: resetting start_epoch to 0.')
-            else:
-                args.start_epoch = checkpoint['epoch'] + 1
+            args.start_epoch = checkpoint['epoch'] + 1
         else:
             if args.reset_epoch:
                 args.start_epoch = 0
-                print('[INFO] args.reset_epoch is True: resetting start_epoch to 0 (no epoch found in checkpoint).')
+                print('[INFO] args.reset_epoch is True: skipping optimizer/scheduler state loading and resetting start_epoch to 0.')
+            else:
+                print('[INFO] Skipping optimizer/scheduler loading (either missing from checkpoint or --reset_epoch not set).')
+                # If resume but no epoch in ckpt and no reset_epoch, we default to 0 (already set in args_parser)
+                pass
         test_stats = evaluate(
             model, criterion, args.dataset_name, data_loader_val, device
         )
