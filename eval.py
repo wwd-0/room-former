@@ -179,8 +179,35 @@ def main(args):
                    )
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser('RoomFormer evaluation script', parents=[get_args_parser()])
-    args = parser.parse_args()
+def _parser_dest_names(parser: argparse.ArgumentParser):
+    return {a.dest for a in parser._actions if a.dest not in ("help", argparse.SUPPRESS)}
 
+def _load_config_dict(path: str):
+    try:
+        from omegaconf import OmegaConf
+    except ImportError:
+        print("ERROR: 需要 omegaconf 以读取 YAML 配置", file=sys.stderr)
+        sys.exit(1)
+    cfg = OmegaConf.load(path)
+    return OmegaConf.to_container(cfg, resolve=True)
+
+def _apply_yaml_to_parser(parser, path):
+    data = _load_config_dict(path)
+    known = _parser_dest_names(parser)
+    to_set = {k: v for k, v in data.items() if k in known}
+    parser.set_defaults(**to_set)
+
+if __name__ == '__main__':
+    import sys
+    _pre = argparse.ArgumentParser(add_help=False)
+    _pre.add_argument('--config', type=str, default=None)
+    _pre_args, _argv_rest = _pre.parse_known_args()
+
+    parser = argparse.ArgumentParser('RoomFormer evaluation script', parents=[get_args_parser()])
+    parser.add_argument('--config', type=str, default=None)
+
+    if _pre_args.config:
+        _apply_yaml_to_parser(parser, _pre_args.config)
+
+    args = parser.parse_args(_argv_rest)
     main(args)
