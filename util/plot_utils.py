@@ -97,7 +97,7 @@ def plot_floorplan_with_regions(regions, corners=None, edges=None, scale=256):
     regions = [(region * scale / 256).round().astype(int) for region in regions]
 
     # define the color map
-    room_colors = [colors[i] for i in range(len(regions))]
+    room_colors = [colors[i % len(colors)] for i in range(len(regions))]
 
     colorMap = [tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in room_colors]
     colorMap = np.asarray(colorMap)
@@ -284,7 +284,7 @@ def plot_semantic_rich_floorplan(polygons, file_name, prec=None, rec=None):
             polygon = Polygon(poly)
             patch = PolygonPatch(polygon, facecolor='#FFFFFF', alpha=1.0, linewidth=0)
             ax.add_patch(patch)
-            patch = PolygonPatch(polygon, facecolor=semantics_cmap[poly_type], alpha=0.5, linewidth=1, capstyle='round', edgecolor='#000000FF')
+            patch = PolygonPatch(polygon, facecolor=semantics_cmap.get(poly_type, '#999999'), alpha=0.5, linewidth=1, capstyle='round', edgecolor='#000000FF')
             ax.add_patch(patch)
             ax.text(np.mean(poly[:, 0]), np.mean(poly[:, 1]), semantics_label[poly_type], size=6, horizontalalignment='center', verticalalignment='center')
 
