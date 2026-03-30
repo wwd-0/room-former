@@ -14,7 +14,10 @@ seed: 42
 output_dir: ../output
 job_name: room_semantic_pano_finetune
 
-# 2. 全景图 (Panorama) 加固设置 - 已启用
+# 2. BEV 输入设置 - 官方权重使用的是 1 通道灰度密度图
+bev_channels: 1
+
+# 3. 全景图 (Panorama) 加固设置 - 已启用
 # 使用官方基座微调时，开启全景图能获得最佳的门窗识别精度
 use_pano: true
 pano_backproject_bias: true
@@ -25,10 +28,10 @@ pano_input_w: 512
 pano_backbone: resnet18
 freeze_pano_backbone: true  # 微调建议先冻结全景图 Backbone 以稳定训练
 
-# 3. 模型架构设置 - 必须与官方 semantic_rich 权重完全对齐
+# 4. 模型架构设置 - 已对齐官方 2800 / 70 规格
 semantic_classes: 19
-num_queries: 800
-num_polys: 20
+num_queries: 2800
+num_polys: 70
 dec_layers: 6
 enc_layers: 6
 hidden_dim: 256
@@ -36,15 +39,15 @@ nheads: 8
 backbone: resnet50
 with_poly_refine: true
 
-# 4. 损失函数权重 (与原论文对齐)
+# 5. 损失函数权重 (与原论文对齐)
 cls_loss_coef: 2.0
 room_cls_loss_coef: 0.2
 coords_loss_coef: 5.0
 raster_loss_coef: 1.0
 
-# 5. 指定官方语义预训练模型路径
+# 6. 指定官方语义预训练模型路径
 resume: ../models/roomformer_stru3d_semantic_rich.pth
 
-# 6. 其他微调设置
+# 7. 其他微调设置
 reset_epoch: true  # 从 0 开始新一轮微调
 device: cuda
