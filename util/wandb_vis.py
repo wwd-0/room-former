@@ -275,12 +275,19 @@ def log_prediction_images(
     if not panel_rows:
         return
 
-    # Stack all rows vertically into one tall image
-    grid = np.concatenate(panel_rows, axis=0)
+    # Split rows into chunks of 4 images each for better visibility
+    samples_per_img = 4
+    num_chunks = (len(panel_rows) + samples_per_img - 1) // samples_per_img
     
     if output_dir:
         import os
         from PIL import Image
-        out_path = os.path.join(output_dir, f"viz_epoch_{epoch:04d}.png")
-        Image.fromarray(grid).save(out_path)
-        print(f"---> Saved visualization to {out_path}")
+        for i in range(num_chunks):
+            chunk = panel_rows[i * samples_per_img : (i + 1) * samples_per_img]
+            grid = np.concatenate(chunk, axis=0)
+            
+            # Versioning suffix: v0, v1 ...
+            suffix = f"_v{i}" if num_chunks > 1 else ""
+            out_path = os.path.join(output_dir, f"viz_epoch_{epoch:04d}{suffix}.png")
+            Image.fromarray(grid).save(out_path)
+            print(f"---> Saved visualization to {out_path}")

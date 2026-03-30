@@ -345,7 +345,7 @@ def main(args):
             epoch=vis_epoch,
             num_polys=args.num_polys,
             canvas_size=256,
-            max_scenes=4,
+            max_scenes=8,
             output_dir=args.output_dir,
         )
 
@@ -439,7 +439,7 @@ def main(args):
                 epoch=epoch,
                 num_polys=args.num_polys,
                 canvas_size=256,
-                max_scenes=4,
+                max_scenes=8,
                 output_dir=args.output_dir,
             )
 
