@@ -1,0 +1,47 @@
+# RoomFormer Tight Layout Fine-tuning Configuration
+# 基于官方 roomformer_stru3d_tight.pth 进行微调
+# 该版本通常用于高精度的几何轮廓提取 (800 Queries 规格)
+
+# 1. 基础训练设置
+dataset_name: custom
+dataset_root: ../mnt_win/dataset  # 请根据实际数据集路径修改
+batch_size: 4      # 800 Queries 显存占用较低，Batch Size 可以设为 4
+epochs: 500
+lr: 0.0002
+lr_drop: [400]
+num_workers: 4
+seed: 42
+output_dir: ../output
+job_name: room_stru3d_tight_finetune
+
+# 2. BEV 输入设置 - 官方权重标准 1 通道
+bev_channels: 1
+
+# 3. 全景图 (Panorama) 设置 - 已禁用 (Tight版通常偏重 BEV 几何)
+use_pano: false
+pano_backproject_bias: false
+max_pano_count: 0
+
+# 4. 模型架构设置 - 对齐官方 Tight 规格 (800/20)
+semantic_classes: -1  # 官方 Tight 版通常不含语义分类
+num_queries: 800
+num_polys: 20
+dec_layers: 6
+enc_layers: 6
+hidden_dim: 256
+nheads: 8
+backbone: resnet50
+with_poly_refine: true
+
+# 5. 损失函数权重
+cls_loss_coef: 2.0
+room_cls_loss_coef: 0.0
+coords_loss_coef: 5.0
+raster_loss_coef: 1.0
+
+# 6. 指定官方 Tight 预训练模型路径
+resume: ../models/roomformer_stru3d_tight.pth
+
+# 7. 其他微调设置
+reset_epoch: true
+device: cuda
