@@ -1,0 +1,44 @@
+# RoomFormer BEV-Only Fine-tuning Configuration
+# 使用方法: python main.py --config configs/roomformer_bev_only.yaml
+
+# 1. 基础训练设置
+dataset_name: custom
+dataset_root: ../mnt_win/dataset  # 请根据实际数据集路径修改
+batch_size: 4
+epochs: 500
+lr: 0.0002
+lr_drop: [400]
+num_workers: 8
+seed: 42
+output_dir: ../output
+job_name: room_bev_finetune
+
+# 2. 全景图 (Panorama) 设置 - 已禁用
+use_pano: false
+pano_backproject_bias: false
+max_pano_count: 0
+
+# 3. 模型架构设置
+# 20 类语义 (16房间 + 1门 + 1窗 + 1门洞 + 1空)
+semantic_classes: 20
+num_queries: 800
+num_polys: 20
+dec_layers: 6
+enc_layers: 6
+hidden_dim: 256
+nheads: 8
+backbone: resnet50
+
+# 4. 损失函数权重 (与原论文对齐)
+cls_loss_coef: 2.0
+coords_loss_coef: 5.0
+raster_loss_coef: 1.0
+room_cls_loss_coef: 0.2
+
+# 5. 断点续训 / 微调权重
+# 指向您下载的官方预训练模型 (.pth 文件)
+resume: ../models/checkpoint_official.pth
+
+# 6. 其他设置
+reset_epoch: true  # 微调通常从 epoch 0 开始计数
+device: cuda

@@ -1,0 +1,50 @@
+# RoomFormer Semantic Fine-tune Configuration (Full Pano + BEV)
+# 基于官方 roomformer_stru3d_semantic_rich.pth 进行全功能微调
+# 包含：19类语义、全景图特征融合、位姿反投影偏置
+
+# 1. 基础训练设置
+dataset_name: custom
+dataset_root: ../mnt_win/dataset  # 请根据服务器上的实际路径修改
+batch_size: 4
+epochs: 500
+lr: 0.0002
+lr_drop: [400]
+num_workers: 8
+seed: 42
+output_dir: ../output
+job_name: room_semantic_pano_finetune
+
+# 2. 全景图 (Panorama) 加固设置 - 已启用
+# 使用官方基座微调时，开启全景图能获得最佳的门窗识别精度
+use_pano: true
+pano_backproject_bias: true
+pano_backproject_sigma: 64.0
+max_pano_count: 10
+pano_input_h: 256
+pano_input_w: 512
+pano_backbone: resnet18
+freeze_pano_backbone: true  # 微调建议先冻结全景图 Backbone 以稳定训练
+
+# 3. 模型架构设置 - 必须与官方 semantic_rich 权重完全对齐
+semantic_classes: 19
+num_queries: 800
+num_polys: 20
+dec_layers: 6
+enc_layers: 6
+hidden_dim: 256
+nheads: 8
+backbone: resnet50
+with_poly_refine: true
+
+# 4. 损失函数权重 (与原论文对齐)
+cls_loss_coef: 2.0
+room_cls_loss_coef: 0.2
+coords_loss_coef: 5.0
+raster_loss_coef: 1.0
+
+# 5. 指定官方语义预训练模型路径
+resume: ../models/roomformer_stru3d_semantic_rich.pth
+
+# 6. 其他微调设置
+reset_epoch: true  # 从 0 开始新一轮微调
+device: cuda
