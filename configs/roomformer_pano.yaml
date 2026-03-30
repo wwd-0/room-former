@@ -3,8 +3,8 @@
 
 # 1. 基础训练设置
 dataset_name: custom
-dataset_root: ../mnt_win/dataset_v3
-batch_size: 4
+dataset_root: ../mnt_win/dataset
+batch_size: 8
 epochs: 500
 lr: 0.0002
 lr_drop: [400]
