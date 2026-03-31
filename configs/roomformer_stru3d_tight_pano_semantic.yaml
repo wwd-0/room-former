@@ -19,9 +19,9 @@ dim_feedforward: 1024
 
 # ── 全景图模块 (符合 roomformer_pano.yaml 规范) ─────────────────
 use_pano: true
-pano_dir: ../mnt_win/dataset/panos
-pano_backbone: resnet18
-max_pano_count: 50
+eano_dir: ../mnt_win/dataset/panos
+pano_backbone: resnet50
+max_pano_count: 15
 pano_grad_ckpt: true  # 梯度检查点，显存节省利器
 pano_input_h: 256
 pano_input_w: 512
@@ -34,6 +34,7 @@ pano_backproject_sigma: 64.0
 bev_channels: 1
 backbone: resnet50
 dilation: false
+lr_backbone: 0.0      # 冻结 BEV backbone，仅训练解码器/全景分支
 
 # ── 损失权重 ──────────────────────────────────────────────────
 room_cls_loss_coef: 0.2
