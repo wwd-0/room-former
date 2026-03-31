@@ -124,7 +124,19 @@ class MultiPoly(Dataset):
         target = coco.loadAnns(ann_ids)
 
         if self.semantic_classes == -1:
-            target = [t for t in target if t['category_id'] not in [16, 17]]
+            target = [t for t in target if t['category_id'] not in [16, 17, 18]]
+        elif self.semantic_classes == 4:
+            # 在线归并 4 类 (0:Room, 1:Door, 2:Window, 3:Hole)
+            for t in target:
+                orig_id = t['category_id']
+                if orig_id < 16:
+                    t['category_id'] = 0
+                elif orig_id == 16:
+                    t['category_id'] = 1
+                elif orig_id == 17:
+                    t['category_id'] = 2
+                elif orig_id == 18:
+                    t['category_id'] = 3
 
         path = coco.loadImgs(img_id)[0]['file_name']
 
