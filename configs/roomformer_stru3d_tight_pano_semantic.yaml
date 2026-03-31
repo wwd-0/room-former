@@ -1,0 +1,45 @@
+# ── 数据集 & 训练设置 ─────────────────────────────────────────
+dataset_name: custom
+dataset_root: ../mnt_win/dataset
+batch_size: 4
+epochs: 500
+lr: 0.0002
+lr_drop: [400]
+reset_epoch: true     # 为了从几何模型转向语义+全景训练
+
+# ── 核心模型架构 (Tight + Semantic) ───────────────────────────
+semantic_classes: 19
+num_queries: 800      # 使用 Tight 版的精简 800 查询点
+num_polys: 40         # 增加实体上限，支持更多门窗
+hidden_dim: 256
+enc_layers: 6
+dec_layers: 6
+nheads: 8
+dim_feedforward: 1024
+
+# ── 全景图模块 (符合 roomformer_pano.yaml 规范) ─────────────────
+use_pano: true
+pano_dir: ../mnt_win/dataset/panos
+pano_backbone: resnet18
+max_pano_count: 5
+pano_grad_ckpt: true  # 梯度检查点，显存节省利器
+pano_input_h: 256
+pano_input_w: 512
+
+# ── 高级全景几何 bias ──────────────────────────────────────────
+pano_backproject_bias: true
+pano_backproject_sigma: 64.0
+
+# ── 输入设置 ──────────────────────────────────────────────────
+bev_channels: 1
+backbone: resnet50
+dilation: false
+
+# ── 损失权重 ──────────────────────────────────────────────────
+room_cls_loss_coef: 0.2
+room_coords_loss_coef: 2.0
+room_raster_loss_coef: 1.0
+
+# ── 路径设置 ──────────────────────────────────────────────────
+resume: ../models/roomformer_stru3d_tight.pth
+output_dir: ../output/tight_pano_semantic_finetune
