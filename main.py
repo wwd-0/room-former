@@ -347,6 +347,7 @@ def main(args):
             canvas_size=256,
             max_scenes=8,
             output_dir=args.output_dir,
+            semantic_classes=args.semantic_classes,
         )
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -441,6 +442,7 @@ def main(args):
                 canvas_size=256,
                 max_scenes=8,
                 output_dir=args.output_dir,
+                semantic_classes=args.semantic_classes,
             )
 
         if args.output_dir:

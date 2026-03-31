@@ -86,20 +86,37 @@ def _draw_lines(canvas: np.ndarray, line_list, color, thickness=3):
     return canvas
 
 
-def _extract_pred_polys(outputs, sample_idx: int, num_polys: int, min_area: float = 100.0):
+def _struct_line_category_ids(semantic_classes: int) -> frozenset:
+    """门/窗/洞等在可视化中按线段绘制的 category_id。
+
+    poly_data 对 4 类语义会把原始 16/17/18 映射为 1/2/3；
+    19 类（Structured3D）下线段类为 16/17/18，1–15 为房间，不可用 [1,2,3] 当门洞。
+    """
+    if semantic_classes == 4:
+        return frozenset({1, 2, 3})
+    if semantic_classes > 0:
+        return frozenset({16, 17, 18})
+    return frozenset()
+
+
+def _extract_pred_polys(
+    outputs,
+    sample_idx: int,
+    num_polys: int,
+    min_area: float = 100.0,
+    semantic_classes: int = -1,
+):
     """Extract predicted room polygons and structural lines (doors/windows)."""
     pred_logits = outputs['pred_logits']   # (B, P, Q, 1)
     pred_coords = outputs['pred_coords']   # (B, P, Q, 2)
-    
+
     is_semantic = 'pred_room_logits' in outputs
     if is_semantic:
-        pred_room_logits = outputs['pred_room_logits'][sample_idx]
-        num_classes = pred_room_logits.shape[-1]
-        pred_labels = pred_room_logits.argmax(-1).cpu().numpy()
-        # 兼容 4 分类和 19 分类
-        struct_ids = [1, 2, 3, 16, 17, 18]
+        pred_labels = outputs['pred_room_logits'][sample_idx].argmax(-1).cpu().numpy()
     else:
-        struct_ids = []
+        pred_labels = None
+
+    struct_ids = _struct_line_category_ids(semantic_classes) if is_semantic else frozenset()
 
     fg_mask = torch.sigmoid(pred_logits[sample_idx]) > 0.5
     if fg_mask.dim() == 3:
@@ -114,7 +131,7 @@ def _extract_pred_polys(outputs, sample_idx: int, num_polys: int, min_area: floa
             continue
         pts = (corners.cpu().float() * 255).numpy().astype(np.int32)
         
-        cat_id = pred_labels[j] if is_semantic else 0
+        cat_id = int(pred_labels[j]) if is_semantic else 0
         if cat_id in struct_ids:
             if len(pts) >= 2:
                 other_lines.append((pts, cat_id))
@@ -131,14 +148,13 @@ def _extract_pred_polys(outputs, sample_idx: int, num_polys: int, min_area: floa
     return room_polys, other_lines
 
 
-def _extract_gt_polys(gt_instance):
+def _extract_gt_polys(gt_instance, semantic_classes: int = -1):
     """Extract GT room polygons and structural lines."""
     room_polys = []
     other_lines = []
     classes = gt_instance.gt_classes.cpu().numpy() if hasattr(gt_instance, 'gt_classes') else None
-    
-    # 只要 ID 在 [1,2,3] 或 [16,17,18] 范围内，都视为线条
-    struct_ids = [1, 2, 3, 16, 17, 18]
+
+    struct_ids = _struct_line_category_ids(semantic_classes)
 
     for i, poly_list in enumerate(gt_instance.gt_masks.polygons):
         pts = poly_list[0].reshape(-1, 2).astype(np.int32)
@@ -158,6 +174,7 @@ def render_comparison(
     pred_data,
     scene_id,
     canvas_size: int = 256,
+    semantic_classes: int = -1,
 ) -> np.ndarray:
     """
     Returns a (canvas_size, canvas_size*3, 3) uint8 RGB image
@@ -168,9 +185,20 @@ def render_comparison(
     pred_rooms, pred_others = pred_data
     
     def _get_line_color(cat_id):
-        if cat_id in [16, 1]: return (255, 0, 0)     # 门 = Red
-        if cat_id in [17, 2]: return (255, 255, 255) # 窗 = White
-        if cat_id in [18, 3]: return (0, 0, 255)     # 门洞 = Blue
+        if semantic_classes == 4:
+            if cat_id == 1:
+                return (255, 0, 0)
+            if cat_id == 2:
+                return (255, 255, 255)
+            if cat_id == 3:
+                return (0, 0, 255)
+        else:
+            if cat_id == 16:
+                return (255, 0, 0)
+            if cat_id == 17:
+                return (255, 255, 255)
+            if cat_id == 18:
+                return (0, 0, 255)
         return (255, 255, 255)
 
     # GT panel
@@ -217,6 +245,7 @@ def log_prediction_images(
     canvas_size: int = 256,
     max_scenes: int = 4,
     output_dir: str = None,
+    semantic_classes: int = -1,
 ):
     """
     Run the model on the first `max_scenes` validation scenes, render
@@ -268,14 +297,16 @@ def log_prediction_images(
             if scene_count >= max_scenes:
                 break
 
-            gt_polys   = _extract_gt_polys(gt_instances[i])
-            pred_polys = _extract_pred_polys(outputs, i, num_polys)
+            gt_polys = _extract_gt_polys(gt_instances[i], semantic_classes=semantic_classes)
+            pred_polys = _extract_pred_polys(
+                outputs, i, num_polys, semantic_classes=semantic_classes)
             row = render_comparison(
                 samples[i],
                 gt_polys,
                 pred_polys,
                 scene_id=scene_ids[i],
                 canvas_size=canvas_size,
+                semantic_classes=semantic_classes,
             )
             panel_rows.append(row)
             scene_count += 1
