@@ -279,7 +279,7 @@ def plot_semantic_rich_floorplan(polygons, file_name, prec=None, rec=None):
     color_map = semantics_cmap
     if is_4_class:
         label_map = {0: 'Room', 1: 'Door', 2: 'Window', 3: 'Hole'}
-        color_map = {0: 'red', 1: 'red', 2: 'blue', 3: 'magenta'}
+        color_map = {0: '#999999', 1: 'red', 2: 'white', 3: 'blue'}
 
     # 计算实体统计
     room_count = 0

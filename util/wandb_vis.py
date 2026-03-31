@@ -168,23 +168,24 @@ def render_comparison(
     pred_rooms, pred_others = pred_data
     
     def _get_line_color(cat_id):
-        if cat_id == 16: return (255, 0, 0)     # 门 = Red
-        if cat_id == 17: return (0, 0, 255)     # 窗 = Blue
-        return (255, 0, 255)                    # 门洞 = Magenta
+        if cat_id in [16, 1]: return (255, 0, 0)     # 门 = Red
+        if cat_id in [17, 2]: return (255, 255, 255) # 窗 = White
+        if cat_id in [18, 3]: return (0, 0, 255)     # 门洞 = Blue
+        return (255, 255, 255)
 
     # GT panel
     gt_canvas = np.ones((canvas_size, canvas_size, 3), dtype=np.uint8) * 240
     for i, (pts, cat_id) in enumerate(gt_rooms):
         _draw_polys(gt_canvas, [pts], _PALETTE[i % len(_PALETTE)], thickness=2)
     for pts, cat_id in gt_others:
-        _draw_lines(gt_canvas, [pts], _get_line_color(cat_id), thickness=3)
+        _draw_lines(gt_canvas, [pts], _get_line_color(cat_id), thickness=1)
 
     # Pred panel
     pred_canvas = np.ones((canvas_size, canvas_size, 3), dtype=np.uint8) * 240
     for i, (pts, cat_id) in enumerate(pred_rooms):
         _draw_polys(pred_canvas, [pts], _PALETTE[i % len(_PALETTE)], thickness=2)
     for pts, cat_id in pred_others:
-        _draw_lines(pred_canvas, [pts], _get_line_color(cat_id), thickness=3)
+        _draw_lines(pred_canvas, [pts], _get_line_color(cat_id), thickness=1)
 
     if HAS_CV2:
         font = cv2.FONT_HERSHEY_SIMPLEX
