@@ -264,29 +264,55 @@ def plot_semantic_rich_floorplan(polygons, file_name, prec=None, rec=None):
     polygons_windows = []
     polygons_doors = []
 
+    # 判定是否为 4 分类模式 (Room, Door, Window, Hole)
+    is_4_class = False
+    all_ids = set([poly_type for (_, poly_type) in polygons])
+    # 如果最大的 ID 小于等于 3，则判定为全新的 4 分类模式
+    if all_ids and max(all_ids) <= 3:
+        is_4_class = True
+        door_id, window_id, hole_id = 1, 2, 3
+    else:
+        door_id, window_id, hole_id = 16, 17, 18
+
+    # 对应的标签和映射表（针对 4 类做了优化）
+    label_map = semantics_label
+    color_map = semantics_cmap
+    if is_4_class:
+        label_map = {0: 'Room', 1: 'Door', 2: 'Window', 3: 'Hole'}
+        color_map = {0: 'red', 1: 'red', 2: 'blue', 3: 'magenta'}
+
+    # 计算实体统计
+    room_count = 0
+    dw_count = 0
+    for (_, poly_type) in polygons:
+        if poly_type == door_id or poly_type == window_id:
+            dw_count += 1
+        else:
+            room_count += 1
+
     # Iterate over rooms to draw black outline
     for (poly, poly_type) in polygons:
         if len(poly) > 2:
             polygon = Polygon(poly)
-            if poly_type != 16 and poly_type != 17:
-                plot_coords(ax, polygon.exterior, alpha=1.0, linewidth=10)
+            if poly_type != door_id and poly_type != window_id:
+                plot_coords(ax, polygon.exterior, alpha=1.0, linewidth=2) # 轮廓线不要太宽
 
     # Iterate over all predicted polygons (rooms, doors, windows)
     for (poly, poly_type) in polygons:
-        if poly_type == 'outqwall':  # unclear what is this?
+        if poly_type == 'outqwall':
             pass
-        elif poly_type == 16:  # Door
+        elif poly_type == door_id:  # Door
             door_length = math.dist(poly[0], poly[1])
             polygons_doors.append([poly, poly_type, door_length])
-        elif poly_type == 17:  # Window
+        elif poly_type == window_id:  # Window
             polygons_windows.append([poly, poly_type])
         else: # regular room
             polygon = Polygon(poly)
             patch = PolygonPatch(polygon, facecolor='#FFFFFF', alpha=1.0, linewidth=0)
             ax.add_patch(patch)
-            patch = PolygonPatch(polygon, facecolor=semantics_cmap.get(poly_type, '#999999'), alpha=0.5, linewidth=1, capstyle='round', edgecolor='#000000FF')
+            patch = PolygonPatch(polygon, facecolor=color_map.get(poly_type, '#999999'), alpha=0.5, linewidth=1, capstyle='round', edgecolor='#000000FF')
             ax.add_patch(patch)
-            ax.text(np.mean(poly[:, 0]), np.mean(poly[:, 1]), semantics_label[poly_type], size=6, horizontalalignment='center', verticalalignment='center')
+            ax.text(np.mean(poly[:, 0]), np.mean(poly[:, 1]), label_map.get(poly_type, str(poly_type)), size=6, horizontalalignment='center', verticalalignment='center')
 
 
     # Compute door size statistics (median)
