@@ -178,14 +178,14 @@ def render_comparison(
     for i, (pts, cat_id) in enumerate(gt_rooms):
         _draw_polys(gt_canvas, [pts], _PALETTE[i % len(_PALETTE)], thickness=2)
     for pts, cat_id in gt_others:
-        _draw_lines(gt_canvas, [pts], _get_line_color(cat_id), thickness=1)
+        _draw_lines(gt_canvas, [pts], _get_line_color(cat_id), thickness=2)
 
     # Pred panel
     pred_canvas = np.ones((canvas_size, canvas_size, 3), dtype=np.uint8) * 240
     for i, (pts, cat_id) in enumerate(pred_rooms):
         _draw_polys(pred_canvas, [pts], _PALETTE[i % len(_PALETTE)], thickness=2)
     for pts, cat_id in pred_others:
-        _draw_lines(pred_canvas, [pts], _get_line_color(cat_id), thickness=1)
+        _draw_lines(pred_canvas, [pts], _get_line_color(cat_id), thickness=2)
 
     if HAS_CV2:
         font = cv2.FONT_HERSHEY_SIMPLEX
