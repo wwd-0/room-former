@@ -93,7 +93,13 @@ def _extract_pred_polys(outputs, sample_idx: int, num_polys: int, min_area: floa
     
     is_semantic = 'pred_room_logits' in outputs
     if is_semantic:
-        pred_labels = outputs['pred_room_logits'][sample_idx].argmax(-1).cpu().numpy()
+        pred_room_logits = outputs['pred_room_logits'][sample_idx]
+        num_classes = pred_room_logits.shape[-1]
+        pred_labels = pred_room_logits.argmax(-1).cpu().numpy()
+        # 兼容 4 分类和 19 分类
+        struct_ids = [1, 2, 3, 16, 17, 18]
+    else:
+        struct_ids = []
 
     fg_mask = torch.sigmoid(pred_logits[sample_idx]) > 0.5
     if fg_mask.dim() == 3:
@@ -109,7 +115,7 @@ def _extract_pred_polys(outputs, sample_idx: int, num_polys: int, min_area: floa
         pts = (corners.cpu().float() * 255).numpy().astype(np.int32)
         
         cat_id = pred_labels[j] if is_semantic else 0
-        if cat_id in [16, 17, 18]:
+        if cat_id in struct_ids:
             if len(pts) >= 2:
                 other_lines.append((pts, cat_id))
         else:
@@ -131,14 +137,18 @@ def _extract_gt_polys(gt_instance):
     other_lines = []
     classes = gt_instance.gt_classes.cpu().numpy() if hasattr(gt_instance, 'gt_classes') else None
     
+    # 只要 ID 在 [1,2,3] 或 [16,17,18] 范围内，都视为线条
+    struct_ids = [1, 2, 3, 16, 17, 18]
+
     for i, poly_list in enumerate(gt_instance.gt_masks.polygons):
         pts = poly_list[0].reshape(-1, 2).astype(np.int32)
         cat_id = classes[i] if classes is not None else 0
-        if cat_id in [16, 17, 18]:
+        if cat_id in struct_ids:
             if len(pts) >= 2:
                 other_lines.append((pts, cat_id))
         elif len(pts) >= 3:
             room_polys.append((pts, cat_id))
+                
     return room_polys, other_lines
 
 
