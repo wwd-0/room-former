@@ -169,6 +169,9 @@ def _load_gt_from_viewdata(
         return px, py
 
     annos: List[Dict[str, Any]] = []
+    # 门/窗/门洞跨房间去重：同一条公共墙线段常在两个房间各出现一次
+    # key: (cat_id, x1, y1, x2, y2)（端点按字典序归一化），值为是否已出现
+    seen_struct_lines = set()
 
     def _map_room_name_to_id(name: str) -> int:
         if not name: return 15
@@ -248,6 +251,20 @@ def _load_gt_from_viewdata(
                         e = obj["End"]["Up"]["Position"]
                         sxp, syp = _to_bev_px(float(s["x"]), float(s["z"]), room_px, room_pz)
                         exp, eyp = _to_bev_px(float(e["x"]), float(e["z"]), room_px, room_pz)
+                        # 端点排序，避免 AB/BA 被视为两条线；再按 1px 精度量化去重
+                        p1 = (float(sxp), float(syp))
+                        p2 = (float(exp), float(eyp))
+                        if p1 > p2:
+                            p1, p2 = p2, p1
+                        dedup_key = (
+                            int(current_cat_id),
+                            round(p1[0], 1), round(p1[1], 1),
+                            round(p2[0], 1), round(p2[1], 1),
+                        )
+                        if dedup_key in seen_struct_lines:
+                            continue
+                        seen_struct_lines.add(dedup_key)
+
                         seg = [sxp, syp, exp, eyp]
                         line_pts = np.array([[sxp, syp], [exp, eyp]], dtype=np.float64)
                         annos.append({
