@@ -70,12 +70,35 @@ def _struct_ids(semantic_classes: int) -> frozenset:
     return frozenset()
 
 
+def _coco_file_rel_to_split(file_name: str, split: str) -> str:
+    """COCO file_name 相对 img_folder（应为 scene/bev.png）；去掉误写入的 split/ 前缀。"""
+    fn = file_name.replace("\\", "/").lstrip("/")
+    parts = fn.split("/")
+    if parts and parts[0] == split:
+        fn = "/".join(parts[1:])
+    return fn
+
+
+def _scene_ids_in_coco(images: List[Dict[str, Any]], split: str) -> List[str]:
+    seen: set[str] = set()
+    order: List[str] = []
+    for im in images:
+        rel = _coco_file_rel_to_split(im.get("file_name", ""), split)
+        parts = rel.split("/")
+        if parts and parts[0]:
+            sid = parts[0]
+            if sid not in seen:
+                seen.add(sid)
+                order.append(sid)
+    return order
+
+
 def _load_coco_scene(
     dataset_root: str,
     split: str,
     scene_id: str,
 ) -> Tuple[str, int, int, List[Dict[str, Any]]]:
-    root = os.path.abspath(dataset_root)
+    root = os.path.abspath(os.path.expanduser(dataset_root))
     ann_path = os.path.join(root, "annotations", f"{split}.json")
     if not os.path.isfile(ann_path):
         raise FileNotFoundError(ann_path)
@@ -84,22 +107,52 @@ def _load_coco_scene(
         coco = json.load(f)
 
     images = coco.get("images", [])
-    prefix = f"{scene_id.strip()}/"
-    img_rec = None
+    sid = str(scene_id).strip()
+    if not sid:
+        raise ValueError("scene 为空")
+
+    candidates: List[Dict[str, Any]] = []
     for im in images:
         fn = im.get("file_name", "").replace("\\", "/")
-        if fn == prefix + "bev_geometric.png" or fn.startswith(prefix):
-            img_rec = im
-            break
+        rel = _coco_file_rel_to_split(fn, split)
+        if rel.startswith(f"{sid}/") or rel.split("/")[0] == sid:
+            candidates.append(im)
+
+    img_rec: Optional[Dict[str, Any]] = None
+    if len(candidates) == 1:
+        img_rec = candidates[0]
+    elif len(candidates) > 1:
+        for im in candidates:
+            rel = _coco_file_rel_to_split(im.get("file_name", ""), split)
+            if rel.endswith("bev_geometric.png"):
+                img_rec = im
+                break
+        img_rec = img_rec or candidates[0]
+
     if img_rec is None:
-        raise ValueError(f"在 {ann_path} 中未找到场景 {scene_id!r} 的图像记录")
+        ids_sample = _scene_ids_in_coco(images, split)
+        n = len(images)
+        hint = ""
+        if ids_sample:
+            show = ", ".join(ids_sample[:12])
+            more = f" …(+{len(ids_sample) - 12})" if len(ids_sample) > 12 else ""
+            hint = f" 当前 {split}.json 中已有 {n} 条图像，示例 scene：{show}{more}。"
+            if sid not in ids_sample:
+                hint += " 若该场景在验证集，请改用 --split val。"
+        raise ValueError(
+            f"在 {ann_path} 中未找到场景 {sid!r} 的图像记录。{hint}"
+        )
 
     iid = int(img_rec["id"])
     w = int(img_rec.get("width", 0))
     h = int(img_rec.get("height", 0))
     anns = [a for a in coco.get("annotations", []) if int(a.get("image_id", -1)) == iid]
 
-    bev_path = os.path.join(root, split, img_rec["file_name"].replace("\\", "/"))
+    fn_raw = img_rec["file_name"].replace("\\", "/").lstrip("/")
+    if fn_raw.startswith(f"{split}/"):
+        bev_path = os.path.join(root, fn_raw)
+    else:
+        bev_path = os.path.join(root, split, fn_raw)
     return bev_path, w, h, anns
 
 
