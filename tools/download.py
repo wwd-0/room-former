@@ -4,6 +4,7 @@ import requests
 import json
 import os
 import re
+import subprocess
 import zipfile
 
 try:
@@ -18,7 +19,7 @@ class Url:
 		self.login_url = 'https://passport.58corp.com/login?service=https%3A%2F%2Faihouse.58corp.com%2F'
 		self.aihouse_url = "https://aihouse.58corp.com/report/byid"
 		# 完整 Cookie 头字符串；None 时首次请求会调用 readCookies() 填充。也可在运行期直接赋值以动态更新。
-		self.cookie_string = 'xxzlclientid=727a7e1d-08d2-47df-b164-1774582600521; xxzlxxid=pfmxbuGWwvZwEB4IxXDh0xpmec1F5H9At+0Hc6PEXO9nM75OzISzxl1oJp61soSV3S3g; xxzlbbid=pfmbRF7rJ4/WOHhSpqTrIxPG3kParal/lSySvZcIuwZq1feo9I+krkV0866NathuKmSTABP+VOOtsBrdNbEYctnXqFxt59O/0QDeVZuXcMrYcnpbe1Qu5j/LS4JcmAmNFiq9BYMdpqIxNzc0ODQxNzM2NTMzMjEx_1; dunCookie=7433eda1d27cb4cfb11d61e2b6da9446e539db5b99814a6d700c29cc0b22eb6777f153d74a386d02; SSO_SESSION_ID=ST-1733004-52bH4UGw6p31qw30beKd-passport-58corp-com'
+		self.cookie_string = 'xxzlclientid=727a7e1d-08d2-47df-b164-1774582600521; xxzlxxid=pfmxbuGWwvZwEB4IxXDh0xpmec1F5H9At+0Hc6PEXO9nM75OzISzxl1oJp61soSV3S3g; xxzlbbid=pfmbRF7rJ4/WOHhSpqTrIxPG3kParal/lSySvZcIuwZq1feo9I+krkV0866NathuKmSTABP+VOOtsBrdNbEYctnXqFxt59O/0QDeVZuXcMrYcnpbe1Qu5j/LS4JcmAmNFiq9BYMdpqIxNzc0ODQxNzM2NTMzMjEx_1; TGC=eyJhbGciOiJIUzUxMiJ9.ZXlKaGJHY2lPaUprYVhJaUxDSmxibU1pT2lKQk1USTRRMEpETFVoVE1qVTJJbjAuLmZ6ODJoZEFkd21lNUpnMGp0X3hxREEuTVRNMGVEZkFxNWgzeXNPSXowTHNHbU45WUxmclBSS3Q3Qzh0ekEyYk53NE5NQ0lMajhXbGJZSkVNRzRYMWQ4SW1yLWlNZ2FkaF9HNFZGUlBSZ3Nodzh6TU9WelpkcGNWMWU3S2MybzY3SkJEZlZUQ1NsZFZqbnhJQ0pkMlY5OXlJM0RNc193VWx5ZWEybW1FYkFBRVRTTkVuZXdiVG90aTY4ckczOHJja0FzLnJrMGdoMFc2X3JGdm1aMlU5TUZseHc.7cb1vSAix7Nb5TCWOOxQ4V9s8pQkUxL91n-TtyWX-LYnPHZEG7Yxp8UbraKN3UefZHUjl4vfPp-BcxC-CjPGPQ; ishare_sso_username=7C6DDBC004BC5D73C005FE2C1C69AD92065D58CDF4F00EF4; dunCookie=20680280e157fc58bd9f4cd62affb73cbd4f29a7b31440b3945f3eece861c4508dcfcae4d637dbad; SSO_SESSION_ID=ST-64549-XIHb4QQQKvxiPiqjKtRY-passport-58corp-com'
 		self.headers = None
 
 	@staticmethod
@@ -527,6 +528,50 @@ class Url:
 		
 		return info
 
+
+def run_batch_prepare_from_download(args):
+	"""
+	下载并解压后，直接调用 batch_prepare_training_data.py 转成训练集格式。
+	"""
+	tools_dir = os.path.dirname(os.path.abspath(__file__))
+	prepare_py = os.path.join(tools_dir, "batch_prepare_training_data.py")
+	if not os.path.isfile(prepare_py):
+		raise FileNotFoundError(f"未找到转换脚本: {prepare_py}")
+
+	scenes_root = os.path.abspath(args.out_dir)
+	dataset_out = os.path.abspath(args.dataset_out or os.path.join(args.out_dir, "roomformer_dataset"))
+	cmd = [
+		"python", prepare_py,
+		"--scenes-root", scenes_root,
+		"--out", dataset_out,
+		"--val-ratio", str(args.val_ratio),
+		"--seed", str(args.seed),
+		"--ply-subdir", args.ply_subdir,
+		"--mpp", str(args.mpp),
+		"--margin", str(args.margin),
+		"--gt-name", args.gt_name,
+	]
+	if args.bev_size is not None:
+		cmd.extend(["--bev-size", str(args.bev_size)])
+	if args.no_log:
+		cmd.append("--no-log")
+	if args.save_bev_extra:
+		cmd.append("--save-bev-extra")
+	if args.gen_ply:
+		cmd.append("--gen-ply")
+	if args.symlink:
+		cmd.append("--symlink")
+	if args.delete_source:
+		cmd.append("--delete-source")
+	if args.allow_empty_gt:
+		cmd.append("--allow-empty-gt")
+	if args.disable_semantic_categories:
+		cmd.append("--no-semantic-categories")
+
+	print("开始转换为 RoomFormer 数据集格式:")
+	print(" ".join(cmd))
+	subprocess.run(cmd, check=True)
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='从 Excel 的 pano_id 列批量下载中间结果包，或调试单条日志 JSON')
 	parser.add_argument('--excel', type=str, help='Excel 路径（含 pano_id 列）')
@@ -537,6 +582,23 @@ if __name__ == '__main__':
 	parser.add_argument('--unzip-dir', type=str, metavar='DIR', help='仅解压：对该目录下所有 .zip 解压到同名文件夹并删除 zip（不下载）')
 	parser.add_argument('--state-file', type=str, metavar='PATH', help='已下载 pano_id 记录 JSON，默认: <out-dir>/pano_download_state.json')
 	parser.add_argument('--force', action='store_true', help='忽略下载记录，仍重新下载并更新记录')
+	parser.add_argument('--prepare-dataset', action='store_true', help='下载后直接转换为 RoomFormer 训练数据')
+	parser.add_argument('--dataset-out', type=str, help='转换输出目录，默认 <out-dir>/roomformer_dataset')
+	parser.add_argument('--disable-semantic-categories', action='store_true',
+						help='转换时关闭语义类别（默认开启 19 类，含门窗）')
+	parser.add_argument('--val-ratio', type=float, default=0.1, help='转换参数：验证集比例')
+	parser.add_argument('--seed', type=int, default=42, help='转换参数：随机种子')
+	parser.add_argument('--ply-subdir', type=str, default='point_clouds_gen', help='转换参数：点云子目录名')
+	parser.add_argument('--bev-size', type=int, default=None, help='转换参数：固定 BEV 尺寸')
+	parser.add_argument('--mpp', type=float, default=0.02, help='转换参数：米/像素')
+	parser.add_argument('--margin', type=int, default=10, help='转换参数：BEV 边缘留白')
+	parser.add_argument('--no-log', action='store_true', help='转换参数：BEV 密度不做 log')
+	parser.add_argument('--save-bev-extra', action='store_true', help='转换参数：额外保存 BEV 附加文件')
+	parser.add_argument('--gen-ply', action='store_true', help='转换参数：强制重建点云')
+	parser.add_argument('--symlink', action='store_true', help='转换参数：全景/深度使用软链')
+	parser.add_argument('--delete-source', action='store_true', help='转换参数：每场景转换成功后删除原始目录')
+	parser.add_argument('--gt-name', type=str, default='floorplan_gt.json', help='转换参数：GT 文件名')
+	parser.add_argument('--allow-empty-gt', action='store_true', help='转换参数：允许空标注')
 	args = parser.parse_args()
 	test = Url()
 
@@ -546,14 +608,17 @@ if __name__ == '__main__':
 		sheet = args.sheet
 		if isinstance(sheet, str) and sheet.isdigit():
 			sheet = int(sheet)
+		unzip_after = args.unzip or args.prepare_dataset
 		test.batch_download_from_excel(
 			args.excel,
 			args.out_dir,
 			sheet_name=sheet,
-			unzip_after=args.unzip,
+			unzip_after=unzip_after,
 			state_file=args.state_file,
 			force_redownload=args.force,
 		)
+		if args.prepare_dataset:
+			run_batch_prepare_from_download(args)
 	elif args.log_demo:
 		res, log_info = test.get_pano_log_info(args.log_demo)
 		if res == 0:

@@ -466,8 +466,9 @@ def main():
     p.add_argument("--symlink", action="store_true", help="全景/深度用软链")
     p.add_argument("--delete-source", action="store_true",
                    help="每场成功导出后删除该场景在 --scenes-root 下的原始目录，节省磁盘；与 --symlink 互斥")
-    p.add_argument("--semantic-categories", action="store_true",
-                   help="COCO categories 使用 19 类 Structured3D 语义表")
+    p.add_argument("--no-semantic-categories", dest="semantic_categories", action="store_false",
+                   help="关闭语义类别（默认开启 19 类 Structured3D 语义表）")
+    p.set_defaults(semantic_categories=True)
     p.add_argument("--gt-name", type=str, default="floorplan_gt.json",
                    help="各场景根目录下 GT 文件名；不存在时自动从 ViewData.txt 转换生成")
     p.add_argument("--allow-empty-gt", action="store_true",
