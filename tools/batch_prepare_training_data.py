@@ -304,6 +304,48 @@ def _build_coco_split(
     }
 
 
+def _merge_coco_append(existing: Dict[str, Any], new_data: Dict[str, Any]) -> Dict[str, Any]:
+    """按 file_name 去重追加 COCO，保留 existing 的历史样本。"""
+    ex_images = list(existing.get("images", []))
+    ex_anns = list(existing.get("annotations", []))
+    categories = existing.get("categories") or new_data.get("categories", [])
+    info = existing.get("info") or new_data.get("info", {})
+
+    keep_file_names = {img.get("file_name", "") for img in ex_images}
+    old_to_new_id: Dict[int, int] = {}
+    next_img_id = max((int(img.get("id", 0)) for img in ex_images), default=0) + 1
+    for img in new_data.get("images", []):
+        fn = img.get("file_name", "")
+        if fn in keep_file_names:
+            continue
+        old_id = int(img["id"])
+        new_id = next_img_id
+        next_img_id += 1
+        old_to_new_id[old_id] = new_id
+        ni = dict(img)
+        ni["id"] = new_id
+        ex_images.append(ni)
+        keep_file_names.add(fn)
+
+    next_ann_id = max((int(a.get("id", 0)) for a in ex_anns), default=0) + 1
+    for ann in new_data.get("annotations", []):
+        old_img_id = int(ann.get("image_id", -1))
+        if old_img_id not in old_to_new_id:
+            continue
+        na = dict(ann)
+        na["id"] = next_ann_id
+        next_ann_id += 1
+        na["image_id"] = old_to_new_id[old_img_id]
+        ex_anns.append(na)
+
+    return {
+        "images": ex_images,
+        "annotations": ex_anns,
+        "categories": categories,
+        "info": info,
+    }
+
+
 def process_one_scene(
     scene_root: str,
     scene_out: str,
@@ -473,6 +515,8 @@ def main():
                    help="各场景根目录下 GT 文件名；不存在时自动从 ViewData.txt 转换生成")
     p.add_argument("--allow-empty-gt", action="store_true",
                    help="允许无 floorplan_gt.json 的场景仍写入图像（标注为空）")
+    p.add_argument("--append", action="store_true",
+                   help="增量模式：若 annotations 已存在则追加新场景，不覆盖旧标注")
     args = p.parse_args()
 
     if args.delete_source and args.symlink:
@@ -566,9 +610,19 @@ def main():
     train_coco = _build_coco_split(train_entries, categories, "train")
     val_coco = _build_coco_split(val_entries, categories, "val")
 
-    with open(os.path.join(ann_dir, "train.json"), "w", encoding="utf-8") as f:
+    train_json_path = os.path.join(ann_dir, "train.json")
+    val_json_path = os.path.join(ann_dir, "val.json")
+    if args.append:
+        if os.path.isfile(train_json_path):
+            with open(train_json_path, "r", encoding="utf-8") as f:
+                train_coco = _merge_coco_append(json.load(f), train_coco)
+        if os.path.isfile(val_json_path):
+            with open(val_json_path, "r", encoding="utf-8") as f:
+                val_coco = _merge_coco_append(json.load(f), val_coco)
+
+    with open(train_json_path, "w", encoding="utf-8") as f:
         json.dump(train_coco, f, ensure_ascii=False)
-    with open(os.path.join(ann_dir, "val.json"), "w", encoding="utf-8") as f:
+    with open(val_json_path, "w", encoding="utf-8") as f:
         json.dump(val_coco, f, ensure_ascii=False)
 
 

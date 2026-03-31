@@ -290,6 +290,7 @@ class Url:
 		unzip_after=False,
 		state_file=None,
 		force_redownload=False,
+		on_item_done=None,
 	):
 		"""
 		解析 Excel 的 pano_id 列，逐个拉取中间结果链接并下载到 out_dir。
@@ -323,6 +324,8 @@ class Url:
 					continue
 			downloaded.add(pid)
 			self.save_downloaded_ids(state_file, downloaded)
+			if on_item_done is not None:
+				on_item_done(pid)
 
 	def batch_unzip_in_dir(self, out_dir):
 		"""
@@ -567,6 +570,7 @@ def run_batch_prepare_from_download(args):
 		cmd.append("--allow-empty-gt")
 	if args.disable_semantic_categories:
 		cmd.append("--no-semantic-categories")
+	cmd.append("--append")
 
 	print("开始转换为 RoomFormer 数据集格式:")
 	print(" ".join(cmd))
@@ -578,12 +582,19 @@ if __name__ == '__main__':
 	parser.add_argument('--out-dir', type=str, default='middle_result_downloads', help='中间结果包保存目录')
 	parser.add_argument('--sheet', default=0, help='工作表名或索引，默认 0')
 	parser.add_argument('--log-demo', type=str, metavar='PANO_ID', help='仅调试：拉取该 pano 的日志并解析 JSON，不下载包')
-	parser.add_argument('--unzip', action='store_true', help='下载成功后批量解压并删除 zip（仅与 --excel 一起使用）')
+	parser.add_argument('--unzip', dest='unzip', action='store_true', default=True,
+						help='下载成功后批量解压并删除 zip（默认开启）')
+	parser.add_argument('--no-unzip', dest='unzip', action='store_false',
+						help='关闭自动解压')
 	parser.add_argument('--unzip-dir', type=str, metavar='DIR', help='仅解压：对该目录下所有 .zip 解压到同名文件夹并删除 zip（不下载）')
 	parser.add_argument('--state-file', type=str, metavar='PATH', help='已下载 pano_id 记录 JSON，默认: <out-dir>/pano_download_state.json')
 	parser.add_argument('--force', action='store_true', help='忽略下载记录，仍重新下载并更新记录')
-	parser.add_argument('--prepare-dataset', action='store_true', help='下载后直接转换为 RoomFormer 训练数据')
+	parser.add_argument('--prepare-dataset', dest='prepare_dataset', action='store_true', default=True,
+						help='下载后直接转换为 RoomFormer 训练数据（默认开启）')
+	parser.add_argument('--no-prepare-dataset', dest='prepare_dataset', action='store_false',
+						help='关闭自动转换')
 	parser.add_argument('--dataset-out', type=str, help='转换输出目录，默认 <out-dir>/roomformer_dataset')
+	parser.add_argument('--prepare-every', type=int, default=50, help='每下载并解压 N 个场景触发一次转换；默认 50')
 	parser.add_argument('--disable-semantic-categories', action='store_true',
 						help='转换时关闭语义类别（默认开启 19 类，含门窗）')
 	parser.add_argument('--val-ratio', type=float, default=0.1, help='转换参数：验证集比例')
@@ -596,7 +607,10 @@ if __name__ == '__main__':
 	parser.add_argument('--save-bev-extra', action='store_true', help='转换参数：额外保存 BEV 附加文件')
 	parser.add_argument('--gen-ply', action='store_true', help='转换参数：强制重建点云')
 	parser.add_argument('--symlink', action='store_true', help='转换参数：全景/深度使用软链')
-	parser.add_argument('--delete-source', action='store_true', help='转换参数：每场景转换成功后删除原始目录')
+	parser.add_argument('--delete-source', dest='delete_source', action='store_true', default=True,
+						help='转换参数：每场景转换成功后删除原始目录（默认开启）')
+	parser.add_argument('--no-delete-source', dest='delete_source', action='store_false',
+						help='转换参数：保留原始目录，不删除')
 	parser.add_argument('--gt-name', type=str, default='floorplan_gt.json', help='转换参数：GT 文件名')
 	parser.add_argument('--allow-empty-gt', action='store_true', help='转换参数：允许空标注')
 	args = parser.parse_args()
@@ -609,6 +623,18 @@ if __name__ == '__main__':
 		if isinstance(sheet, str) and sheet.isdigit():
 			sheet = int(sheet)
 		unzip_after = args.unzip or args.prepare_dataset
+		prepare_every = max(int(args.prepare_every), 1) if args.prepare_dataset else 0
+		since_last_prepare = [0]
+
+		def _on_item_done(_pid):
+			if not args.prepare_dataset:
+				return
+			since_last_prepare[0] += 1
+			if since_last_prepare[0] >= prepare_every:
+				print(f"[INFO] 已累计 {since_last_prepare[0]} 个新场景，触发一次增量转换...")
+				run_batch_prepare_from_download(args)
+				since_last_prepare[0] = 0
+
 		test.batch_download_from_excel(
 			args.excel,
 			args.out_dir,
@@ -616,9 +642,12 @@ if __name__ == '__main__':
 			unzip_after=unzip_after,
 			state_file=args.state_file,
 			force_redownload=args.force,
+			on_item_done=_on_item_done,
 		)
 		if args.prepare_dataset:
-			run_batch_prepare_from_download(args)
+			if since_last_prepare[0] > 0:
+				print(f"[INFO] 收尾转换：处理最后 {since_last_prepare[0]} 个场景...")
+				run_batch_prepare_from_download(args)
 	elif args.log_demo:
 		res, log_info = test.get_pano_log_info(args.log_demo)
 		if res == 0:
